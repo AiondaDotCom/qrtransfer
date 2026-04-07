@@ -184,15 +184,15 @@ export class AudioEncoder {
       windowStart = totalChunks;
     }
 
-    // Build bitfield for 64 chunks starting at windowStart
-    const windowSize = 64;
+    // Build bitfield for 32 chunks starting at windowStart (4 bytes — short frame)
+    const windowSize = 32;
     const windowSet = new Set<number>();
     for (let i = 0; i < windowSize && (windowStart + i) < totalChunks; i++) {
       if (received.has(windowStart + i)) windowSet.add(i);
     }
     const bitfieldBytes = encodeBitfieldRaw(windowSet, windowSize);
 
-    // Frame: [offset_hi][offset_lo][bitfield 8 bytes]
+    // Frame: [offset_hi][offset_lo][bitfield 4 bytes]
     const payload = new Uint8Array(2 + bitfieldBytes.length);
     payload[0] = (windowStart >> 8) & 0xff;
     payload[1] = windowStart & 0xff;
@@ -422,8 +422,8 @@ export class AudioDecoder {
           this.dataLength = this.bitsToValue(this.bitBuffer);
           this.bitBuffer = [];
           this.bytesCollected = [];
-          // Expected length is 10 (2 offset + 8 bitfield)
-          if (this.dataLength !== 10) {
+          // Expected length is 6 (2 offset + 4 bitfield)
+          if (this.dataLength !== 6) {
             this.resetState();
           } else {
             this.state = DecoderState.READ_DATA;
@@ -470,14 +470,14 @@ export class AudioDecoder {
     // Parse offset + bitfield
     const windowStart = (payload[0] << 8) | payload[1];
     const bitfield = payload.slice(2);
-    const windowReceived = decodeBitfieldRaw(bitfield, 64);
+    const windowReceived = decodeBitfieldRaw(bitfield, 32);
 
     // Map window-relative positions to absolute chunk positions
     const received = new Set<number>();
     for (const relIdx of windowReceived) {
       received.add(windowStart + relIdx);
     }
-    this.onFeedback(received, windowStart + 64);
+    this.onFeedback(received, windowStart + 32);
   }
 
   stop(): void {
