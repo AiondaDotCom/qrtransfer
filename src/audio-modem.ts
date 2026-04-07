@@ -1,9 +1,9 @@
 import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 
-// FSK Parameters (Bell 202)
-export const FREQ_ZERO = 1200;
-export const FREQ_ONE = 2400;
-export const BAUD_RATE = 25;
+// FSK Parameters (Bell 202 Pro — optimized for speaker-to-mic)
+export const FREQ_ZERO = 1500;  // non-harmonic pair, 3000 Hz apart
+export const FREQ_ONE = 4500;
+export const BAUD_RATE = 10;    // 100ms per bit — very robust
 export const SAMPLE_RATE = 44100;
 export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE);
 export const PREAMBLE_BYTE = 0xaa;
@@ -196,11 +196,12 @@ export class AudioEncoder {
     payload.set(bitfieldBytes, 2);
     const crcVal = crc8(payload);
 
-    const frame = new Uint8Array(2 + 1 + 6 + 1); // preamble + sync + payload + crc
+    const frame = new Uint8Array(4 + 1 + 6 + 1); // preamble×4 + sync + payload + crc
     frame[0] = PREAMBLE_BYTE; frame[1] = PREAMBLE_BYTE;
-    frame[2] = SYNC_WORD;
-    frame.set(payload, 3);
-    frame[9] = crcVal;
+    frame[2] = PREAMBLE_BYTE; frame[3] = PREAMBLE_BYTE;
+    frame[4] = SYNC_WORD;
+    frame.set(payload, 5);
+    frame[11] = crcVal;
 
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -390,10 +391,10 @@ export class AudioDecoder {
     switch (this.state) {
       case DecoderState.WAIT_PREAMBLE:
         this.bitBuffer.push(bit);
-        if (this.bitBuffer.length > 16) this.bitBuffer.shift();
-        if (this.bitBuffer.length >= 12) {
+        if (this.bitBuffer.length > 32) this.bitBuffer.shift();
+        if (this.bitBuffer.length >= 20) {
           let alternating = true;
-          for (let i = this.bitBuffer.length - 12; i < this.bitBuffer.length - 1; i++) {
+          for (let i = this.bitBuffer.length - 20; i < this.bitBuffer.length - 1; i++) {
             if (this.bitBuffer[i] === this.bitBuffer[i + 1]) { alternating = false; break; }
           }
           if (alternating) {
