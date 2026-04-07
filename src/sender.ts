@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { createChunks, createTextChunks, serializePacket, ChunkPacket } from './protocol';
-import { AudioDecoder, measurePeakFrequency, FREQ_ZERO, FREQ_ONE } from './audio-modem';
+import { AudioDecoder, CalibrationMic, FREQ_ZERO, FREQ_ONE } from './audio-modem';
 
 export interface SenderCallbacks {
   onProgress: (current: number, total: number) => void;
@@ -137,43 +137,54 @@ export class Sender {
 
   async startCalibration(): Promise<void> {
     const status = this.callbacks.onCalibrationStatus;
-    status?.('Calibrating: play LOW tone...');
+    const calQR = async (data: string) => {
+      await QRCode.toCanvas(this.canvas, JSON.stringify(data), {
+        width: 380, margin: 2, errorCorrectionLevel: 'M',
+        color: { dark: '#000000', light: '#ffffff' },
+      });
+    };
 
-    // Show calibration QR for low tone
-    await QRCode.toCanvas(this.canvas, JSON.stringify({ cal: 'low' }), {
-      width: 380, margin: 2, errorCorrectionLevel: 'M',
-      color: { dark: '#000000', light: '#ffffff' },
-    });
-    await new Promise((r) => setTimeout(r, 500)); // wait for phone to scan
+    // Open mic once for all measurements
+    status?.('Opening microphone...');
+    const mic = await CalibrationMic.open();
 
-    // Measure low tone
-    status?.('Measuring LOW frequency...');
-    const low = await measurePeakFrequency(2000, FREQ_ZERO - 200, FREQ_ZERO + 200, 5);
-    status?.(`LOW: ${low.freq} Hz (mag ${low.magnitude.toFixed(0)})`);
+    // --- LOW TONE ---
+    status?.('Waiting for LOW tone... (point phone at screen)');
+    await calQR('{"cal":"low"}');
 
-    // Show calibration QR for high tone
-    await QRCode.toCanvas(this.canvas, JSON.stringify({ cal: 'high' }), {
-      width: 380, margin: 2, errorCorrectionLevel: 'M',
-      color: { dark: '#000000', light: '#ffffff' },
-    });
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait until we hear something in the low frequency range
+    let low = { freq: FREQ_ZERO, magnitude: 0 };
+    while (low.magnitude < 5) {
+      low = await mic.measurePeak(500, FREQ_ZERO - 200, FREQ_ZERO + 200, 5);
+      status?.(`Waiting for LOW tone... (mag: ${low.magnitude.toFixed(0)})`);
+    }
+    // Got it! Measure more precisely for 1.5 more seconds
+    status?.('Heard LOW tone! Measuring...');
+    const lowFinal = await mic.measurePeak(1500, low.freq - 50, low.freq + 50, 2);
+    status?.(`LOW: ${lowFinal.freq} Hz`);
 
-    // Measure high tone
-    status?.('Measuring HIGH frequency...');
-    const high = await measurePeakFrequency(2000, FREQ_ONE - 200, FREQ_ONE + 200, 5);
-    status?.(`HIGH: ${high.freq} Hz (mag ${high.magnitude.toFixed(0)})`);
+    // --- HIGH TONE ---
+    status?.('Waiting for HIGH tone...');
+    await calQR('{"cal":"high"}');
 
-    // Done — tell phone to start modem
-    await QRCode.toCanvas(this.canvas, JSON.stringify({ cal: 'done' }), {
-      width: 380, margin: 2, errorCorrectionLevel: 'M',
-      color: { dark: '#000000', light: '#ffffff' },
-    });
-    await new Promise((r) => setTimeout(r, 500));
+    let high = { freq: FREQ_ONE, magnitude: 0 };
+    while (high.magnitude < 5) {
+      high = await mic.measurePeak(500, FREQ_ONE - 200, FREQ_ONE + 200, 5);
+      status?.(`Waiting for HIGH tone... (mag: ${high.magnitude.toFixed(0)})`);
+    }
+    status?.('Heard HIGH tone! Measuring...');
+    const highFinal = await mic.measurePeak(1500, high.freq - 50, high.freq + 50, 2);
+    status?.(`HIGH: ${highFinal.freq} Hz`);
 
-    this.calibratedFreqs = { freqZero: low.freq, freqOne: high.freq };
-    status?.(`Calibrated! ${low.freq}/${high.freq} Hz`);
+    mic.close();
 
-    console.log(`[CAL] Calibrated: low=${low.freq}Hz (mag=${low.magnitude.toFixed(0)}), high=${high.freq}Hz (mag=${high.magnitude.toFixed(0)})`);
+    // Tell phone to start modem
+    await calQR('{"cal":"done"}');
+    await new Promise((r) => setTimeout(r, 1000));
+
+    this.calibratedFreqs = { freqZero: lowFinal.freq, freqOne: highFinal.freq };
+    status?.(`Calibrated! ${lowFinal.freq}/${highFinal.freq} Hz`);
+    console.log(`[CAL] low=${lowFinal.freq}Hz high=${highFinal.freq}Hz`);
   }
 
   async startListening(): Promise<void> {

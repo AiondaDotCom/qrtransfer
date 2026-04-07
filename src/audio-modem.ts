@@ -163,49 +163,62 @@ export function fecDecode(encoded: Uint8Array, originalBitCount: number): Uint8A
 }
 
 // ===== Calibration: measure peak frequency from mic =====
-export async function measurePeakFrequency(
-  durationMs: number,
-  minFreq: number,
-  maxFreq: number,
-  stepHz: number = 10
-): Promise<{ freq: number; magnitude: number }> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
-  });
-  const ctx = new AudioContext();
-  await ctx.resume();
-  const sr = ctx.sampleRate;
-  const source = ctx.createMediaStreamSource(stream);
-  const processor = ctx.createScriptProcessor(4096, 1, 1);
-  const allSamples: number[] = [];
+// Calibration mic session — opened once, reused for multiple measurements
+export class CalibrationMic {
+  private ctx: AudioContext;
+  private stream: MediaStream;
+  private processor: ScriptProcessorNode;
+  private samples: number[] = [];
+  private recording = false;
 
-  processor.onaudioprocess = (e) => {
-    const input = e.inputBuffer.getChannelData(0);
-    for (let i = 0; i < input.length; i++) allSamples.push(input[i]);
-  };
-  source.connect(processor);
-  processor.connect(ctx.destination);
-
-  await new Promise((r) => setTimeout(r, durationMs));
-
-  processor.disconnect();
-  stream.getTracks().forEach((t) => t.stop());
-  ctx.close();
-
-  // Goertzel sweep to find peak
-  const samples = new Float32Array(allSamples);
-  let bestFreq = minFreq;
-  let bestMag = 0;
-
-  for (let f = minFreq; f <= maxFreq; f += stepHz) {
-    const mag = goertzelMagnitude(samples, 0, samples.length, f, sr);
-    if (mag > bestMag) {
-      bestMag = mag;
-      bestFreq = f;
-    }
+  private constructor(ctx: AudioContext, stream: MediaStream, processor: ScriptProcessorNode) {
+    this.ctx = ctx;
+    this.stream = stream;
+    this.processor = processor;
   }
 
-  return { freq: bestFreq, magnitude: bestMag };
+  static async open(): Promise<CalibrationMic> {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
+    });
+    const ctx = new AudioContext();
+    await ctx.resume();
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    const mic = new CalibrationMic(ctx, stream, processor);
+
+    processor.onaudioprocess = (e) => {
+      if (mic.recording) {
+        const input = e.inputBuffer.getChannelData(0);
+        for (let i = 0; i < input.length; i++) mic.samples.push(input[i]);
+      }
+    };
+    source.connect(processor);
+    processor.connect(ctx.destination);
+    return mic;
+  }
+
+  async measurePeak(durationMs: number, minFreq: number, maxFreq: number, stepHz = 5): Promise<{ freq: number; magnitude: number }> {
+    this.samples = [];
+    this.recording = true;
+    await new Promise((r) => setTimeout(r, durationMs));
+    this.recording = false;
+
+    const buf = new Float32Array(this.samples);
+    const sr = this.ctx.sampleRate;
+    let bestFreq = minFreq, bestMag = 0;
+    for (let f = minFreq; f <= maxFreq; f += stepHz) {
+      const mag = goertzelMagnitude(buf, 0, buf.length, f, sr);
+      if (mag > bestMag) { bestMag = mag; bestFreq = f; }
+    }
+    return { freq: bestFreq, magnitude: bestMag };
+  }
+
+  close(): void {
+    this.processor.disconnect();
+    this.stream.getTracks().forEach((t) => t.stop());
+    this.ctx.close();
+  }
 }
 
 // ===== Calibration tone player (used by receiver/phone) =====
