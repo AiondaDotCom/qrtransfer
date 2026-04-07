@@ -206,7 +206,11 @@ export class AudioEncoder {
     await this.ctx.resume(); // ensure not suspended
     const actualRate = this.ctx.sampleRate;
 
-    const bitfieldBytes = encodeBitfieldRaw(received, totalChunks);
+    // Cap bitfield at 32 bytes (256 chunks) for reliable audio transfer
+    // For larger files, only encode the first 256 chunks worth of data
+    const maxBitfieldChunks = 256;
+    const effectiveChunks = Math.min(totalChunks, maxBitfieldChunks);
+    const bitfieldBytes = encodeBitfieldRaw(received, effectiveChunks);
     const frame = buildFrame(bitfieldBytes);
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -277,6 +281,8 @@ export class AudioDecoder {
   private bitsDecoded = 0;
   private silenceCount = 0;
   private preambleFound = 0;
+  private crcFails = 0;
+  private crcOk = 0;
 
   // Ring buffer for samples — no allocations during audio callback
   private ringBuffer = new Float32Array(RING_BUFFER_SIZE);
@@ -359,8 +365,9 @@ export class AudioDecoder {
     // Report debug info
     if (this.onDebug) {
       const stateNames = ['PREAMBLE', 'SYNC', 'LENGTH', 'DATA'];
+      const extra = this.state === 3 ? ` len:${this.dataLength} got:${this.bytesCollected.length}/${this.dataLength + 1}` : '';
       this.onDebug(
-        `${stateNames[this.state]} | bits:${this.bitsDecoded} sil:${this.silenceCount} pre:${this.preambleFound} buf:${this.availableSamples()} rate:${this.actualSampleRate} spb:${this.actualSamplesPerBit}`
+        `${stateNames[this.state]} | bits:${this.bitsDecoded} pre:${this.preambleFound} crc:${this.crcOk}ok/${this.crcFails}fail${extra}`
       );
     }
 
@@ -508,7 +515,12 @@ export class AudioDecoder {
     crcInput[0] = this.dataLength;
     crcInput.set(data, 1);
 
-    if (crc8(crcInput) !== receivedCrc) return;
+    if (crc8(crcInput) !== receivedCrc) {
+      this.crcFails++;
+      return;
+    }
+
+    this.crcOk++;
 
     // Don't fire feedback in the first 2 seconds (avoid false positives from startup noise)
     if (Date.now() - this.startTime < 2000) return;
