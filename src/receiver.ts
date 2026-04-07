@@ -121,15 +121,22 @@ export class Receiver {
     } else if (command === 'done') {
       if (this.calPlayer) this.calPlayer.stop();
       this.calPlayer = null;
-      // Start modem if not already running
-      if (!this.encoder) this.startAudioFeedback();
+      // Start modem after calibration
+      if (!this.encoder) this.startModemFeedback();
     }
   }
 
   // ===== Audio Feedback =====
+  private audioEnabled = false;
+
   startAudioFeedback(): void {
+    // Don't play modem tones yet — wait for calibration QR commands first
+    // The modem starts when {"cal":"done"} is received
+    this.audioEnabled = true;
+  }
+
+  private startModemFeedback(): void {
     this.encoder = new AudioEncoder();
-    // Start immediately with empty bitfield (signals "receiver ready")
     this.encoder.start(this.receivedChunks, Math.max(this.totalChunks, 1));
     this.feedbackThrottleId = window.setInterval(() => {
       if (this.feedbackDirty && this.encoder) {
@@ -151,7 +158,7 @@ export class Receiver {
   }
 
   get isAudioFeedbackActive(): boolean {
-    return this.encoder !== null;
+    return this.audioEnabled;
   }
 
   async flipCamera(): Promise<void> {

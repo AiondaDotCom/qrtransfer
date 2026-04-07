@@ -297,10 +297,14 @@ sendAudioEnabled.addEventListener('change', async () => {
   if (!sender) return;
   if (sendAudioEnabled.checked && !sender.isListening) {
     try {
-      await sender.startListening();
       audioIndicator.classList.remove('hidden');
+      audioIndicatorText.textContent = 'Calibrating audio...';
+      sender.pause();
+      await sender.startCalibration();
+      await sender.startListening();
       audioIndicatorText.textContent = 'Listening for audio feedback...';
-      audioIndicatorDetail.textContent = '';
+      sender.play();
+      updatePlayButton();
     } catch { /* mic optional */ }
   } else if (!sendAudioEnabled.checked && sender.isListening) {
     sender.stopListening();
