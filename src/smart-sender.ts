@@ -76,7 +76,7 @@ export class SmartSender {
   async startCamera(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: 'environment',
+        facingMode: 'user',
         width: { ideal: 640 },
         height: { ideal: 480 },
       },
