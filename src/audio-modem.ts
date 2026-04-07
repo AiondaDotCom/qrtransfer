@@ -3,7 +3,7 @@ import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 // FSK Parameters (Bell 202)
 export const FREQ_ZERO = 1200;
 export const FREQ_ONE = 2400;
-export const BAUD_RATE = 50;
+export const BAUD_RATE = 25;
 export const SAMPLE_RATE = 44100;
 export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE);
 export const PREAMBLE_BYTE = 0xaa;
@@ -174,11 +174,26 @@ export class AudioEncoder {
     await this.ctx.resume();
     const actualRate = this.ctx.sampleRate;
 
-    // Bitfield for first 64 chunks (8 bytes) — proven to decode at 13-byte frame
-    const maxChunks = 64;
-    const effectiveChunks = Math.min(totalChunks, maxChunks);
-    const bitfieldBytes = encodeBitfieldRaw(received, effectiveChunks);
-    const frame = buildFrame(bitfieldBytes);
+    // Sliding window: start at first missing chunk, 32-chunk bitfield + offset
+    let windowStart = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      if (!received.has(i)) { windowStart = i; break; }
+    }
+    if (received.size === totalChunks) windowStart = totalChunks;
+
+    const windowSize = 32;
+    const windowSet = new Set<number>();
+    for (let i = 0; i < windowSize && (windowStart + i) < totalChunks; i++) {
+      if (received.has(windowStart + i)) windowSet.add(i);
+    }
+    const bitfieldBytes = encodeBitfieldRaw(windowSet, windowSize);
+
+    // Payload: [offset_hi][offset_lo][bitfield 4 bytes]
+    const payload = new Uint8Array(2 + bitfieldBytes.length);
+    payload[0] = (windowStart >> 8) & 0xff;
+    payload[1] = windowStart & 0xff;
+    payload.set(bitfieldBytes, 2);
+    const frame = buildFrame(payload);
 
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -402,8 +417,8 @@ export class AudioDecoder {
           this.dataLength = this.bitsToValue(this.bitBuffer);
           this.bitBuffer = [];
           this.bytesCollected = [];
-          // Expected length is 8 (bitfield for 64 chunks)
-          if (this.dataLength !== 8) {
+          // Expected length is 6 (2 offset + 4 bitfield)
+          if (this.dataLength !== 6) {
             this.resetState();
           } else {
             this.state = DecoderState.READ_DATA;
@@ -447,10 +462,17 @@ export class AudioDecoder {
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
 
-    // Bitfield covers first 64 chunks
-    const totalChunks = this.dataLength * 8;
-    const received = decodeBitfieldRaw(payload, totalChunks);
-    this.onFeedback(received, totalChunks);
+    // Parse offset + bitfield
+    const windowStart = (payload[0] << 8) | payload[1];
+    const bitfield = payload.slice(2);
+    const windowReceived = decodeBitfieldRaw(bitfield, 32);
+
+    // Map to absolute chunk positions
+    const received = new Set<number>();
+    for (const relIdx of windowReceived) {
+      received.add(windowStart + relIdx);
+    }
+    this.onFeedback(received, windowStart + 32);
   }
 
   stop(): void {
