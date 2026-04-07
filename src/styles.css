@@ -827,6 +827,26 @@ input[type='range']::-webkit-slider-thumb:hover {
   transition: all var(--transition);
 }
 
+.audio-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  min-height: 120px;
+}
+
+.audio-status.active {
+  color: var(--success);
+  border-color: var(--success-glow);
+}
+
 .feedback-badge.active {
   color: var(--success);
   border-color: var(--success-glow);

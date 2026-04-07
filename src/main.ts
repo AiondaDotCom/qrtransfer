@@ -538,9 +538,8 @@ const smartSendActive = $('smart-send-active');
 const smartSendFilename = $('smart-send-filename');
 const smartSendFilesize = $('smart-send-filesize');
 const smartSendQr = $<HTMLCanvasElement>('smart-send-qr');
-const smartSendCamera = $<HTMLVideoElement>('smart-send-camera');
-const smartSendScan = $<HTMLCanvasElement>('smart-send-scan');
 const smartFeedbackStatus = $('smart-feedback-status');
+const smartAudioListenStatus = $('smart-audio-listen-status');
 const smartSendRemaining = $('smart-send-remaining');
 const smartSendTotal = $('smart-send-total');
 const smartSendProgress = $('smart-send-progress');
@@ -557,7 +556,6 @@ const smartRecvActive = $('smart-recv-active');
 const smartBtnStartRecv = $<HTMLButtonElement>('smart-btn-start-recv');
 const smartRecvCamera = $<HTMLVideoElement>('smart-recv-camera');
 const smartRecvScan = $<HTMLCanvasElement>('smart-recv-scan');
-const smartFeedbackQr = $<HTMLCanvasElement>('smart-feedback-qr');
 const smartRecvCurrent = $('smart-recv-current');
 const smartRecvTotal = $('smart-recv-total');
 const smartRecvProgress = $('smart-recv-progress');
@@ -609,7 +607,7 @@ smartDropZone.addEventListener('drop', (e) => {
 async function handleSmartFile(file: File) {
   if (smartSender) smartSender.destroy();
 
-  smartSender = new SmartSender(smartSendQr, smartSendCamera, smartSendScan, {
+  smartSender = new SmartSender(smartSendQr, {
     onReady: (total) => {
       smartSendIdle.classList.add('hidden');
       smartSendActive.classList.remove('hidden');
@@ -646,8 +644,9 @@ smartBtnPlay.addEventListener('click', async () => {
     smartSender.pause();
   } else {
     try {
-      await smartSender.startCamera();
-    } catch { /* camera optional */ }
+      await smartSender.startListening();
+      smartAudioListenStatus.classList.add('active');
+    } catch { /* mic optional */ }
     smartSender.play();
   }
   updateSmartPlayButton();
@@ -680,7 +679,6 @@ smartBtnStartRecv.addEventListener('click', async () => {
   smartReceiver = new SmartReceiver(
     smartRecvCamera,
     smartRecvScan,
-    smartFeedbackQr,
     {
       onChunkReceived: (_index, total, received) => {
         smartRecvCurrent.textContent = String(received);
@@ -726,12 +724,7 @@ smartBtnStopRecv.addEventListener('click', () => {
   smartRecvActive.classList.add('hidden');
 });
 
-// Smart camera flip buttons
-const btnFlipSmartSend = $<HTMLButtonElement>('btn-flip-smart-send');
-btnFlipSmartSend.addEventListener('click', () => {
-  if (smartSender) smartSender.flipCamera();
-});
-
+// Smart camera flip button (receive only)
 const btnFlipSmartRecv = $<HTMLButtonElement>('btn-flip-smart-recv');
 btnFlipSmartRecv.addEventListener('click', () => {
   if (smartReceiver) smartReceiver.flipCamera();

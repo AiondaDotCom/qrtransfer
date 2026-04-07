@@ -8,21 +8,18 @@ export interface FeedbackPacket {
   b: string; // base64-encoded bitfield
 }
 
-export function encodeBitfield(received: Set<number>, totalChunks: number): string {
+export function encodeBitfieldRaw(received: Set<number>, totalChunks: number): Uint8Array {
   const byteCount = Math.ceil(totalChunks / 8);
   const bytes = new Uint8Array(byteCount);
   for (const idx of received) {
     if (idx >= 0 && idx < totalChunks) {
-      const byteIndex = Math.floor(idx / 8);
-      const bitIndex = idx % 8;
-      bytes[byteIndex] |= 1 << bitIndex;
+      bytes[Math.floor(idx / 8)] |= 1 << (idx % 8);
     }
   }
-  return toBase64(bytes);
+  return bytes;
 }
 
-export function decodeBitfield(b64: string, totalChunks: number): Set<number> {
-  const bytes = fromBase64(b64);
+export function decodeBitfieldRaw(bytes: Uint8Array, totalChunks: number): Set<number> {
   const result = new Set<number>();
   for (let i = 0; i < totalChunks; i++) {
     const byteIndex = Math.floor(i / 8);
@@ -32,6 +29,14 @@ export function decodeBitfield(b64: string, totalChunks: number): Set<number> {
     }
   }
   return result;
+}
+
+export function encodeBitfield(received: Set<number>, totalChunks: number): string {
+  return toBase64(encodeBitfieldRaw(received, totalChunks));
+}
+
+export function decodeBitfield(b64: string, totalChunks: number): Set<number> {
+  return decodeBitfieldRaw(fromBase64(b64), totalChunks);
 }
 
 export function createFeedbackPacket(

@@ -1,7 +1,6 @@
 import QRCode from 'qrcode';
-import jsQR from 'jsqr';
 import { createChunks, createTextChunks, serializePacket, ChunkPacket } from './protocol';
-import { parseFeedback, getMissingChunks } from './feedback';
+import { AudioDecoder } from './audio-modem';
 
 export interface SmartSenderCallbacks {
   onReady: (totalChunks: number) => void;
@@ -18,25 +17,15 @@ export class SmartSender {
   private timerId: number | null = null;
   private speed = 100;
   private canvas: HTMLCanvasElement;
-  private video: HTMLVideoElement;
-  private scanCanvas: HTMLCanvasElement;
-  private scanCtx: CanvasRenderingContext2D;
   private callbacks: SmartSenderCallbacks;
-  private stream: MediaStream | null = null;
-  private scanIntervalId: number | null = null;
+  private decoder: AudioDecoder | null = null;
   private completed = false;
-  private facing: 'environment' | 'user' = 'user';
 
   constructor(
     canvas: HTMLCanvasElement,
-    video: HTMLVideoElement,
-    scanCanvas: HTMLCanvasElement,
     callbacks: SmartSenderCallbacks
   ) {
     this.canvas = canvas;
-    this.video = video;
-    this.scanCanvas = scanCanvas;
-    this.scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true })!;
     this.callbacks = callbacks;
   }
 
@@ -74,64 +63,30 @@ export class SmartSender {
     this.callbacks.onProgress(chunkIndex, this.packets.length, this.playlist.length);
   }
 
-  async startCamera(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: this.facing,
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-      },
+  async startListening(): Promise<void> {
+    this.decoder = new AudioDecoder((received, _totalChunks) => {
+      this.handleAudioFeedback(received);
     });
-    this.video.srcObject = this.stream;
-    await this.video.play();
-
-    // Scan for feedback QR every 500ms
-    this.scanIntervalId = window.setInterval(() => {
-      this.scanFeedback();
-    }, 500);
+    await this.decoder.start();
   }
 
-  private scanFeedback(): void {
-    if (this.video.readyState !== this.video.HAVE_ENOUGH_DATA) return;
+  private handleAudioFeedback(received: Set<number>): void {
+    const total = this.packets.length;
+    this.callbacks.onFeedbackReceived(received.size, total);
 
-    this.scanCanvas.width = this.video.videoWidth;
-    this.scanCanvas.height = this.video.videoHeight;
-    this.scanCtx.drawImage(this.video, 0, 0);
-
-    const imageData = this.scanCtx.getImageData(
-      0,
-      0,
-      this.scanCanvas.width,
-      this.scanCanvas.height
-    );
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert',
-    });
-
-    if (code && code.data) {
-      const feedback = parseFeedback(code.data);
-      if (feedback) {
-        this.handleFeedback(feedback);
-      }
+    const missing: number[] = [];
+    for (let i = 0; i < total; i++) {
+      if (!received.has(i)) missing.push(i);
     }
-  }
-
-  private handleFeedback(feedback: ReturnType<typeof parseFeedback>): void {
-    if (!feedback) return;
-
-    const missing = getMissingChunks(feedback);
-    this.callbacks.onFeedbackReceived(feedback.r, feedback.t);
 
     if (missing.length === 0) {
-      // All chunks received
       this.completed = true;
       this.pause();
-      this.stopCamera();
+      this.stopListening();
       this.callbacks.onComplete();
       return;
     }
 
-    // Update playlist to only missing chunks
     this.playlist = missing;
     this.playlistIndex = this.playlistIndex % this.playlist.length;
   }
@@ -168,30 +123,10 @@ export class SmartSender {
     }
   }
 
-  async flipCamera(): Promise<void> {
-    this.facing = this.facing === 'environment' ? 'user' : 'environment';
-    if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
-    }
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: this.facing,
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-      },
-    });
-    this.video.srcObject = this.stream;
-    await this.video.play();
-  }
-
-  stopCamera(): void {
-    if (this.scanIntervalId !== null) {
-      clearInterval(this.scanIntervalId);
-      this.scanIntervalId = null;
-    }
-    if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
-      this.stream = null;
+  stopListening(): void {
+    if (this.decoder) {
+      this.decoder.stop();
+      this.decoder = null;
     }
   }
 
@@ -213,7 +148,7 @@ export class SmartSender {
 
   destroy(): void {
     this.pause();
-    this.stopCamera();
+    this.stopListening();
     this.packets = [];
     this.playlist = [];
     this.playlistIndex = 0;

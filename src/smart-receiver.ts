@@ -1,7 +1,6 @@
 import jsQR from 'jsqr';
-import QRCode from 'qrcode';
 import { parsePacket, assembleChunks, ChunkPacket, TransferMetadata } from './protocol';
-import { createFeedbackPacket, serializeFeedback } from './feedback';
+import { AudioEncoder } from './audio-modem';
 
 export interface SmartReceiverCallbacks {
   onChunkReceived: (index: number, total: number, received: number) => void;
@@ -14,7 +13,6 @@ export class SmartReceiver {
   private video: HTMLVideoElement;
   private scanCanvas: HTMLCanvasElement;
   private scanCtx: CanvasRenderingContext2D;
-  private feedbackCanvas: HTMLCanvasElement;
   private chunks: Map<number, ChunkPacket> = new Map();
   private totalChunks = 0;
   private scanning = false;
@@ -23,18 +21,17 @@ export class SmartReceiver {
   private stream: MediaStream | null = null;
   private feedbackDirty = false;
   private feedbackThrottleId: number | null = null;
+  private encoder: AudioEncoder | null = null;
   private facing: 'environment' | 'user' = 'environment';
 
   constructor(
     video: HTMLVideoElement,
     scanCanvas: HTMLCanvasElement,
-    feedbackCanvas: HTMLCanvasElement,
     callbacks: SmartReceiverCallbacks
   ) {
     this.video = video;
     this.scanCanvas = scanCanvas;
     this.scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true })!;
-    this.feedbackCanvas = feedbackCanvas;
     this.callbacks = callbacks;
   }
 
@@ -51,11 +48,18 @@ export class SmartReceiver {
     this.scanning = true;
     this.scanLoop();
 
-    // Start feedback QR throttle loop
+    this.encoder = new AudioEncoder();
+
+    // Throttle audio feedback updates to every 200ms
     this.feedbackThrottleId = window.setInterval(() => {
       if (this.feedbackDirty && this.totalChunks > 0) {
         this.feedbackDirty = false;
-        this.renderFeedbackQR();
+        if (!this.encoder!.isPlaying) {
+          this.encoder!.start(this.receivedChunks, this.totalChunks);
+        } else {
+          this.encoder!.update(this.receivedChunks, this.totalChunks);
+        }
+        this.callbacks.onFeedbackUpdated(this.chunks.size, this.totalChunks);
       }
     }, 200);
   }
@@ -108,18 +112,6 @@ export class SmartReceiver {
     }
   }
 
-  private async renderFeedbackQR(): Promise<void> {
-    const packet = createFeedbackPacket(this.receivedChunks, this.totalChunks);
-    const data = serializeFeedback(packet);
-    await QRCode.toCanvas(this.feedbackCanvas, data, {
-      width: 200,
-      margin: 2,
-      errorCorrectionLevel: 'L',
-      color: { dark: '#000000', light: '#ffffff' },
-    });
-    this.callbacks.onFeedbackUpdated(this.chunks.size, this.totalChunks);
-  }
-
   stop(): void {
     this.scanning = false;
     if (this.animFrameId !== null) {
@@ -130,22 +122,14 @@ export class SmartReceiver {
       clearInterval(this.feedbackThrottleId);
       this.feedbackThrottleId = null;
     }
+    if (this.encoder) {
+      this.encoder.stop();
+      this.encoder = null;
+    }
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
     }
-  }
-
-  get receivedChunks(): Set<number> {
-    return new Set(this.chunks.keys());
-  }
-
-  get receivedCount(): number {
-    return this.chunks.size;
-  }
-
-  get total(): number {
-    return this.totalChunks;
   }
 
   async flipCamera(): Promise<void> {
@@ -162,6 +146,18 @@ export class SmartReceiver {
     });
     this.video.srcObject = this.stream;
     await this.video.play();
+  }
+
+  get receivedChunks(): Set<number> {
+    return new Set(this.chunks.keys());
+  }
+
+  get receivedCount(): number {
+    return this.chunks.size;
+  }
+
+  get total(): number {
+    return this.totalChunks;
   }
 
   reset(): void {

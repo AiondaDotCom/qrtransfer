@@ -58,62 +58,41 @@ The receiver collects chunks in any order, reassembles, decompresses, and verifi
 
 ## Smart Transfer (Bidirectional Feedback)
 
-Smart Transfer creates a **bidirectional QR channel** where the receiver tells the sender which chunks are still missing. The sender then skips already-received chunks, dramatically speeding up the transfer.
+Smart Transfer creates a **bidirectional channel** where the receiver tells the sender which chunks are still missing via **audio tones** (like a modem). The sender then skips already-received chunks, dramatically speeding up the transfer.
 
 ### How it works
 
-The receiver encodes its progress as a compact bitfield (1 bit per chunk) in a feedback QR code. The sender's camera reads this feedback and adapts its playlist to only show missing chunks.
-
-### Laptop-to-Laptop (direct)
-
-Both screens face each other. Each device runs one role:
+- **Data** flows via QR codes (sender screen → receiver camera) — fast, visual
+- **Feedback** flows via audio FSK tones (receiver speaker → sender microphone) — omnidirectional, no line-of-sight needed
 
 ```
   Device A (Smart Send)           Device B (Smart Receive)
   ┌──────────────────┐            ┌──────────────────┐
-  │   [DATA QR]      │ ◄─ scans  │   [CAMERA]       │
-  │   chunks 3,7,12  │           │   reading data   │
-  │                  │           │                  │
-  │   [CAMERA]       │  scans ─► │   [FEEDBACK QR]  │
-  │   reading fbk    │           │   "need 3,7,12"  │
+  │                  │            │                  │
+  │   [DATA QR]      │ ── eye ──► │   [CAMERA]       │
+  │   chunks 3,7,12  │            │   scanning QR    │
+  │                  │            │                  │
+  │   [MICROPHONE]   │ ◄─ ear ── │   [SPEAKER]      │
+  │   listening      │    audio   │   FSK tones      │
+  │                  │            │   "got 1,2,4,5"  │
   └──────────────────┘            └──────────────────┘
-       ▲                                  │
-       │     feedback loop (continuous)    │
-       └──────────────────────────────────┘
 ```
 
-### Phone as Bridge (between two laptops)
+The phone can lie flat on a table — audio works in all directions, no camera positioning needed.
 
-The phone relays data between two laptops that can't see each other:
+### Audio Feedback Protocol (FSK Modem)
 
-```
-  Laptop A                Phone                  Laptop B
-  (Smart Send)          (relay)               (Smart Receive)
-  ┌──────────┐     ┌──────────────┐      ┌──────────┐
-  │[DATA QR] │◄cam │  [SCREEN]   │ cam►  │ [CAMERA] │
-  │          │     │  shows QR   │       │          │
-  │[CAMERA]  │◄scr │  [FEEDBACK] │ scr►  │[FEED QR] │
-  └──────────┘     └──────────────┘      └──────────┘
-```
+The feedback is encoded as FSK (Frequency Shift Keying) audio:
 
-### Feedback Protocol
+- **1200 Hz** = bit "0", **2400 Hz** = bit "1" (Bell 202 standard)
+- **300 baud** — each bit lasts ~3.3ms
+- **Frame format**: `[preamble 0xAA 0xAA] [sync 0xD5] [length] [bitfield] [CRC-8]`
+- **Bitfield**: 1 bit per chunk (received=1, missing=0), raw bytes
+- **CRC-8/CCITT**: integrity check, invalid frames are silently discarded
 
-The feedback QR contains a JSON packet with a bitfield:
+For 100 chunks: 13 bytes bitfield → 144 bits total → **0.48 seconds** per feedback cycle.
 
-```json
-{
-  "v": 1,
-  "f": true,
-  "t": 500,
-  "r": 342,
-  "b": "base64-bitfield..."
-}
-```
-
-- `f: true` distinguishes feedback from data packets
-- `b` is a base64-encoded bitfield (1 bit per chunk, 1=received, 0=missing)
-- For 2000 chunks: ~334 bytes — fits in a single QR code
-- For 10,000 chunks: ~1,700 bytes — still fits
+The receiver plays the feedback audio in a continuous loop. The sender's microphone picks it up, decodes via Goertzel algorithm, and adapts its QR playlist to only show missing chunks.
 
 ## Recommended file sizes
 
