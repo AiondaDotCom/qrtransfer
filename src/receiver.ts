@@ -78,6 +78,27 @@ export class Receiver {
   }
 
   private calPlayer: CalibrationTonePlayer | null = null;
+  private calPlaying = false;
+
+  private async playCalPattern(freq: number): Promise<void> {
+    if (this.calPlaying) return;
+    this.calPlaying = true;
+    const p = this.calPlayer!;
+    // Loop: 3 beeps with pauses, repeat until next command
+    while (this.calPlaying) {
+      await p.playTone(freq, 500);
+      if (!this.calPlaying) break;
+      await new Promise(r => setTimeout(r, 500));
+      if (!this.calPlaying) break;
+      await p.playTone(freq, 500);
+      if (!this.calPlaying) break;
+      await new Promise(r => setTimeout(r, 500));
+      if (!this.calPlaying) break;
+      await p.playTone(freq, 500);
+      if (!this.calPlaying) break;
+      await new Promise(r => setTimeout(r, 1500)); // longer gap before repeat
+    }
+  }
 
   private handleQRData(raw: string): void {
     // Check for calibration commands first
@@ -115,10 +136,15 @@ export class Receiver {
   private async handleCalibration(command: string): Promise<void> {
     if (!this.calPlayer) this.calPlayer = new CalibrationTonePlayer();
     if (command === 'low') {
-      this.calPlayer.playTone(FREQ_ZERO, 2000);
+      this.calPlaying = false; // stop any previous pattern
+      await new Promise(r => setTimeout(r, 100));
+      this.playCalPattern(FREQ_ZERO);
     } else if (command === 'high') {
-      this.calPlayer.playTone(FREQ_ONE, 2000);
+      this.calPlaying = false;
+      await new Promise(r => setTimeout(r, 100));
+      this.playCalPattern(FREQ_ONE);
     } else if (command === 'done') {
+      this.calPlaying = false;
       if (this.calPlayer) this.calPlayer.stop();
       this.calPlayer = null;
       // Start modem after calibration

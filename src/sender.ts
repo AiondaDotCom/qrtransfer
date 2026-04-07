@@ -148,32 +148,44 @@ export class Sender {
     status?.('Opening microphone...');
     const mic = await CalibrationMic.open();
 
-    // --- LOW TONE ---
-    status?.('Waiting for LOW tone... (point phone at screen)');
-    await calQR('{"cal":"low"}');
+    // Helper: detect 3-beep pattern (on-off-on-off-on)
+    const detect3Beeps = async (minF: number, maxF: number, label: string): Promise<{ freq: number; magnitude: number }> => {
+      const THRESH = 15;
+      let beeps = 0;
+      let wasLoud = false;
+      let bestResult = { freq: (minF + maxF) / 2, magnitude: 0 };
 
-    // Wait until we hear something in the low frequency range
-    let low = { freq: FREQ_ZERO, magnitude: 0 };
-    while (low.magnitude < 5) {
-      low = await mic.measurePeak(500, FREQ_ZERO - 200, FREQ_ZERO + 200, 5);
-      status?.(`Waiting for LOW tone... (mag: ${low.magnitude.toFixed(0)})`);
-    }
-    // Got it! Measure more precisely for 1.5 more seconds
-    status?.('Heard LOW tone! Measuring...');
-    const lowFinal = await mic.measurePeak(1500, low.freq - 50, low.freq + 50, 2);
+      while (beeps < 2) {
+        const m = await mic.measurePeak(300, minF, maxF, 5);
+        const loud = m.magnitude > THRESH;
+
+        if (loud && !wasLoud) {
+          beeps++;
+          if (m.magnitude > bestResult.magnitude) bestResult = m;
+          status?.(`${label}: beep ${beeps}/3 (${m.freq} Hz, mag ${m.magnitude.toFixed(0)})`);
+        } else if (!loud && wasLoud) {
+          // silence after beep — good, waiting for next
+        } else if (!loud) {
+          status?.(`${label}: waiting for beep ${beeps + 1}/3...`);
+        }
+        wasLoud = loud;
+      }
+
+      // Fine measurement on the detected frequency
+      status?.(`${label}: measuring precisely...`);
+      const fine = await mic.measurePeak(1000, bestResult.freq - 50, bestResult.freq + 50, 2);
+      return fine;
+    };
+
+    // --- LOW TONE ---
+    status?.('Point phone at screen. Waiting for 3 beeps...');
+    await calQR('{"cal":"low"}');
+    const lowFinal = await detect3Beeps(FREQ_ZERO - 300, FREQ_ZERO + 300, 'LOW');
     status?.(`LOW: ${lowFinal.freq} Hz`);
 
     // --- HIGH TONE ---
-    status?.('Waiting for HIGH tone...');
     await calQR('{"cal":"high"}');
-
-    let high = { freq: FREQ_ONE, magnitude: 0 };
-    while (high.magnitude < 5) {
-      high = await mic.measurePeak(500, FREQ_ONE - 200, FREQ_ONE + 200, 5);
-      status?.(`Waiting for HIGH tone... (mag: ${high.magnitude.toFixed(0)})`);
-    }
-    status?.('Heard HIGH tone! Measuring...');
-    const highFinal = await mic.measurePeak(1500, high.freq - 50, high.freq + 50, 2);
+    const highFinal = await detect3Beeps(FREQ_ONE - 300, FREQ_ONE + 300, 'HIGH');
     status?.(`HIGH: ${highFinal.freq} Hz`);
 
     mic.close();
