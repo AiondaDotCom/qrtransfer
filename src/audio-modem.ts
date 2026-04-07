@@ -169,6 +169,42 @@ export function goertzelMagnitude(
   return Math.sqrt(s1 * s1 + s2 * s2 - coeff * s1 * s2);
 }
 
+// FEC: 3x repetition encoding — each bit sent 3 times
+export function fecEncode(data: Uint8Array): Uint8Array {
+  const bits: number[] = [];
+  for (let i = 0; i < data.length; i++) {
+    for (let b = 7; b >= 0; b--) {
+      const bit = (data[i] >> b) & 1;
+      bits.push(bit, bit, bit); // 3x repetition
+    }
+  }
+  // Pack back into bytes
+  const out = new Uint8Array(Math.ceil(bits.length / 8));
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i]) out[Math.floor(i / 8)] |= 1 << (7 - (i % 8));
+  }
+  return out;
+}
+
+// FEC: 3x repetition decoding — majority vote
+export function fecDecode(encoded: Uint8Array, originalBitCount: number): Uint8Array {
+  const bits: number[] = [];
+  for (let i = 0; i < encoded.length; i++) {
+    for (let b = 7; b >= 0; b--) {
+      bits.push((encoded[i] >> b) & 1);
+    }
+  }
+  const out = new Uint8Array(Math.ceil(originalBitCount / 8));
+  for (let i = 0; i < originalBitCount; i++) {
+    const a = bits[i * 3] ?? 0;
+    const b = bits[i * 3 + 1] ?? 0;
+    const c = bits[i * 3 + 2] ?? 0;
+    const vote = (a + b + c >= 2) ? 1 : 0; // majority
+    if (vote) out[Math.floor(i / 8)] |= 1 << (7 - (i % 8));
+  }
+  return out;
+}
+
 // Generate waveform using a specific sample rate (for real audio output)
 function generateWaveformAtRate(frame: Uint8Array, sampleRate: number): Float32Array {
   const samplesPerBit = Math.round(sampleRate / BAUD_RATE);
@@ -206,12 +242,27 @@ export class AudioEncoder {
     await this.ctx.resume(); // ensure not suspended
     const actualRate = this.ctx.sampleRate;
 
-    // Cap bitfield at 32 bytes (256 chunks) for reliable audio transfer
-    // For larger files, only encode the first 256 chunks worth of data
-    const maxBitfieldChunks = 256;
+    // Cap bitfield at 4 bytes (32 chunks) for reliable audio transfer with FEC
+    const maxBitfieldChunks = 32;
     const effectiveChunks = Math.min(totalChunks, maxBitfieldChunks);
     const bitfieldBytes = encodeBitfieldRaw(received, effectiveChunks);
-    const frame = buildFrame(bitfieldBytes);
+
+    // Build inner payload: [length][bitfield][CRC], then FEC encode the whole thing
+    const innerLen = bitfieldBytes.length;
+    const inner = new Uint8Array(1 + innerLen + 1);
+    inner[0] = innerLen;
+    inner.set(bitfieldBytes, 1);
+    inner[1 + innerLen] = crc8(inner.subarray(0, 1 + innerLen));
+
+    const fecData = fecEncode(inner);
+
+    // Wrap with preamble + sync + fec-length
+    const frame = new Uint8Array(2 + 1 + 1 + fecData.length);
+    frame[0] = PREAMBLE_BYTE;
+    frame[1] = PREAMBLE_BYTE;
+    frame[2] = SYNC_WORD;
+    frame[3] = fecData.length;
+    frame.set(fecData, 4);
     const waveform = generateWaveformAtRate(frame, actualRate);
 
     const buffer = this.ctx.createBuffer(1, waveform.length, actualRate);
@@ -365,7 +416,7 @@ export class AudioDecoder {
     // Report debug info
     if (this.onDebug) {
       const stateNames = ['PREAMBLE', 'SYNC', 'LENGTH', 'DATA'];
-      const extra = this.state === 3 ? ` len:${this.dataLength} got:${this.bytesCollected.length}/${this.dataLength + 1}` : '';
+      const extra = this.state === 3 ? ` len:${this.dataLength} got:${this.bytesCollected.length}/${this.dataLength}` : '';
       this.onDebug(
         `${stateNames[this.state]} | bits:${this.bitsDecoded} pre:${this.preambleFound} crc:${this.crcOk}ok/${this.crcFails}fail${extra}`
       );
@@ -490,7 +541,8 @@ export class AudioDecoder {
           this.bytesCollected.push(this.bitsToValue(this.bitBuffer));
           this.bitBuffer = [];
 
-          if (this.bytesCollected.length === this.dataLength + 1) {
+          // No outer CRC — all data is FEC-encoded, CRC is inside
+          if (this.bytesCollected.length === this.dataLength) {
             this.validateFrame();
             this.resetState();
           }
@@ -508,14 +560,30 @@ export class AudioDecoder {
   }
 
   private validateFrame(): void {
-    const data = new Uint8Array(this.bytesCollected.slice(0, this.dataLength));
-    const receivedCrc = this.bytesCollected[this.dataLength];
+    const fecData = new Uint8Array(this.bytesCollected);
 
-    const crcInput = new Uint8Array(1 + this.dataLength);
-    crcInput[0] = this.dataLength;
-    crcInput.set(data, 1);
+    // FEC decode: 3x repetition → majority vote
+    // Inner payload has (dataLength * 8 / 3) original bits
+    const originalBitCount = Math.floor(this.dataLength * 8 / 3);
+    const inner = fecDecode(fecData, originalBitCount);
 
-    if (crc8(crcInput) !== receivedCrc) {
+    // Inner format: [length][bitfield...][CRC-8]
+    if (inner.length < 2) {
+      this.crcFails++;
+      return;
+    }
+
+    const bitfieldLen = inner[0];
+    if (inner.length < 1 + bitfieldLen + 1) {
+      this.crcFails++;
+      return;
+    }
+
+    const bitfield = inner.subarray(1, 1 + bitfieldLen);
+    const receivedCrc = inner[1 + bitfieldLen];
+    const expectedCrc = crc8(inner.subarray(0, 1 + bitfieldLen));
+
+    if (expectedCrc !== receivedCrc) {
       this.crcFails++;
       return;
     }
@@ -525,8 +593,8 @@ export class AudioDecoder {
     // Don't fire feedback in the first 2 seconds (avoid false positives from startup noise)
     if (Date.now() - this.startTime < 2000) return;
 
-    const totalChunks = this.dataLength * 8;
-    const received = decodeBitfieldRaw(data, totalChunks);
+    const totalChunks = bitfieldLen * 8;
+    const received = decodeBitfieldRaw(bitfield, totalChunks);
     this.onFeedback(received, totalChunks);
   }
 
