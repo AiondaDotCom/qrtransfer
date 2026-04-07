@@ -11,7 +11,7 @@ export class Sender {
   private currentIndex = 0;
   private playing = false;
   private timerId: number | null = null;
-  private speed = 600;
+  private speed = 100;
   private canvas: HTMLCanvasElement;
   private callbacks: SenderCallbacks;
 
