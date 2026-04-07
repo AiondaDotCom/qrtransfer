@@ -415,6 +415,7 @@ input[type='range']::-webkit-slider-thumb:hover {
   position: relative;
   display: flex;
   justify-content: center;
+  align-items: center;
   padding: 24px;
   background: white;
   border-radius: var(--radius);
@@ -809,7 +810,8 @@ input[type='range']::-webkit-slider-thumb:hover {
 
 .qr-area-compact canvas {
   max-width: 100%;
-  height: auto;
+  height: auto !important;
+  aspect-ratio: 1;
 }
 
 .feedback-badge {
