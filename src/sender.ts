@@ -138,7 +138,7 @@ export class Sender {
   async startCalibration(): Promise<void> {
     const status = this.callbacks.onCalibrationStatus;
     const calQR = async (data: string) => {
-      await QRCode.toCanvas(this.canvas, JSON.stringify(data), {
+      await QRCode.toCanvas(this.canvas, data, {
         width: 380, margin: 2, errorCorrectionLevel: 'M',
         color: { dark: '#000000', light: '#ffffff' },
       });
