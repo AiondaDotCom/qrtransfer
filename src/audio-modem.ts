@@ -257,8 +257,8 @@ export class AudioDecoder {
     await this.ctx.resume();
 
     const source = this.ctx.createMediaStreamSource(this.stream);
-    // ggwave expects 1024 samples per frame
-    this.processor = this.ctx.createScriptProcessor(1024, 1, 1);
+    // ggwave needs at least 4096 samples per decode() call
+    this.processor = this.ctx.createScriptProcessor(4096, 1, 1);
 
     this.processor.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
