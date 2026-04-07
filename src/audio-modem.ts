@@ -173,11 +173,14 @@ export class AudioEncoder {
     await this.ctx.resume();
     const sampleRate = 48000;
 
-    // Convert Int8 waveform to Float32 for Web Audio API playback
-    const float32 = new Float32Array(waveform.length);
+    // Convert Int8 waveform to Float32 + append 1s silence for loop gap
+    // Without silence, ggwave's END marker bleeds into START marker on loop
+    const silenceSamples = sampleRate; // 1 second of silence
+    const float32 = new Float32Array(waveform.length + silenceSamples);
     for (let i = 0; i < waveform.length; i++) {
       float32[i] = waveform[i] / 128.0;
     }
+    // Remaining samples are 0 (silence)
 
     const buffer = this.ctx.createBuffer(1, float32.length, sampleRate);
     buffer.getChannelData(0).set(float32);
