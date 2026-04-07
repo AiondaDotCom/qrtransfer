@@ -411,7 +411,8 @@ export class AudioDecoder {
           this.dataLength = this.bitsToValue(this.bitBuffer);
           this.bitBuffer = [];
           this.bytesCollected = [];
-          if (this.dataLength === 0 || this.dataLength > 200) {
+          // Expected length is always 15 (5 inner bytes × 3 FEC)
+          if (this.dataLength !== 15) {
             this.resetState();
           } else {
             this.state = DecoderState.READ_DATA;
