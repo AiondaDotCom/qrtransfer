@@ -473,6 +473,29 @@ btnResend.addEventListener('click', async () => {
   }
 });
 
+// ===== Receive: New Transfer =====
+const btnReceiveNew = $<HTMLButtonElement>('btn-receive-new');
+btnReceiveNew.addEventListener('click', () => {
+  if (receiver) receiver.reset();
+  // Reset UI
+  recvInfo.classList.add('hidden');
+  receiveComplete.classList.add('hidden');
+  textResult.classList.add('hidden');
+  chunkGrid.innerHTML = '';
+  recvCurrent.textContent = '0';
+  recvTotal.textContent = '0';
+  recvProgress.style.width = '0%';
+  recvFilename.textContent = '-';
+  recvFilesize.textContent = '-';
+  // Show camera and controls again
+  const cameraWrapper = receiveActive.querySelector('.camera-wrapper') as HTMLElement;
+  if (cameraWrapper) cameraWrapper.classList.remove('hidden');
+  const recvControls = receiveActive.querySelector('.receive-controls') as HTMLElement;
+  if (recvControls) recvControls.classList.remove('hidden');
+  // Restart scanning
+  btnStartScan.click();
+});
+
 btnDownload.addEventListener('click', () => {
   if (!downloadBlob) return;
   const url = URL.createObjectURL(downloadBlob);
