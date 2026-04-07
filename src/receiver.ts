@@ -1,5 +1,6 @@
 import jsQR from 'jsqr';
 import { parsePacket, assembleChunks, ChunkPacket, TransferMetadata } from './protocol';
+import { AudioEncoder } from './audio-modem';
 
 export interface ReceiverCallbacks {
   onChunkReceived: (index: number, total: number, received: number) => void;
@@ -19,6 +20,11 @@ export class Receiver {
   private stream: MediaStream | null = null;
   private lastScannedIndex = -1;
   private facing: 'environment' | 'user' = 'environment';
+
+  // Audio feedback (optional)
+  private encoder: AudioEncoder | null = null;
+  private feedbackDirty = false;
+  private feedbackThrottleId: number | null = null;
 
   constructor(
     video: HTMLVideoElement,
@@ -79,6 +85,7 @@ export class Receiver {
     this.chunks.set(packet.i, packet);
     this.totalChunks = packet.t;
     this.lastScannedIndex = packet.i;
+    this.feedbackDirty = true;
 
     this.callbacks.onChunkReceived(packet.i, packet.t, this.chunks.size);
 
@@ -93,12 +100,55 @@ export class Receiver {
     }
   }
 
+  // ===== Audio Feedback =====
+  startAudioFeedback(): void {
+    this.encoder = new AudioEncoder();
+    this.feedbackThrottleId = window.setInterval(() => {
+      if (this.feedbackDirty && this.totalChunks > 0 && this.encoder) {
+        this.feedbackDirty = false;
+        if (!this.encoder.isPlaying) {
+          this.encoder.start(this.receivedChunks, this.totalChunks);
+        } else {
+          this.encoder.update(this.receivedChunks, this.totalChunks);
+        }
+      }
+    }, 200);
+  }
+
+  stopAudioFeedback(): void {
+    if (this.feedbackThrottleId !== null) {
+      clearInterval(this.feedbackThrottleId);
+      this.feedbackThrottleId = null;
+    }
+    if (this.encoder) {
+      this.encoder.stop();
+      this.encoder = null;
+    }
+  }
+
+  async flipCamera(): Promise<void> {
+    this.facing = this.facing === 'environment' ? 'user' : 'environment';
+    if (this.stream) {
+      this.stream.getTracks().forEach((t) => t.stop());
+    }
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: this.facing,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+    this.video.srcObject = this.stream;
+    await this.video.play();
+  }
+
   stop(): void {
     this.scanning = false;
     if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
+    this.stopAudioFeedback();
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
@@ -121,26 +171,11 @@ export class Receiver {
     return this.lastScannedIndex;
   }
 
-  async flipCamera(): Promise<void> {
-    this.facing = this.facing === 'environment' ? 'user' : 'environment';
-    if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
-    }
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: this.facing,
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-    });
-    this.video.srcObject = this.stream;
-    await this.video.play();
-  }
-
   reset(): void {
     this.stop();
     this.chunks.clear();
     this.totalChunks = 0;
     this.lastScannedIndex = -1;
+    this.feedbackDirty = false;
   }
 }

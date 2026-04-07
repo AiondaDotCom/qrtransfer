@@ -167,6 +167,13 @@ export class AudioEncoder {
 }
 
 // ===== AudioDecoder: listens via microphone (used by sender) =====
+// Uses a non-blocking architecture:
+// - ScriptProcessorNode just copies samples to a ring buffer (fast, no allocation)
+// - setInterval processes accumulated samples every 500ms (controlled, won't block UI)
+
+const RING_BUFFER_SIZE = 65536; // ~1.5 seconds at 44100 Hz
+const PROCESS_INTERVAL_MS = 500;
+const NOISE_THRESHOLD = 0.02;
 
 const enum DecoderState {
   WAIT_PREAMBLE,
@@ -179,18 +186,21 @@ export class AudioDecoder {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private processIntervalId: number | null = null;
   private _isListening = false;
   private onFeedback: (received: Set<number>, totalChunks: number) => void;
 
+  // Ring buffer for samples — no allocations during audio callback
+  private ringBuffer = new Float32Array(RING_BUFFER_SIZE);
+  private writePos = 0;
+  private readPos = 0;
+
   // Decoder state
   private state: DecoderState = DecoderState.WAIT_PREAMBLE;
-  private sampleBuffer: Float32Array = new Float32Array(0);
-  private sampleOffset = 0;
   private bitBuffer: number[] = [];
-  private preambleCount = 0;
   private dataLength = 0;
   private bytesCollected: number[] = [];
-  private noiseThreshold = 0.01;
+  private startTime = 0;
 
   constructor(
     onFeedback: (received: Set<number>, totalChunks: number) => void
@@ -201,55 +211,52 @@ export class AudioDecoder {
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    this.startTime = Date.now();
 
     const source = this.ctx.createMediaStreamSource(this.stream);
-    // 4096 samples per buffer gives ~93ms chunks, good for processing
     this.processor = this.ctx.createScriptProcessor(4096, 1, 1);
 
+    // Audio callback: just copy samples to ring buffer (no processing, no allocation)
     this.processor.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
-      this.processSamples(input);
+      for (let i = 0; i < input.length; i++) {
+        this.ringBuffer[this.writePos] = input[i];
+        this.writePos = (this.writePos + 1) & (RING_BUFFER_SIZE - 1);
+      }
     };
 
     source.connect(this.processor);
     this.processor.connect(this.ctx.destination);
     this._isListening = true;
     this.resetState();
+
+    // Process samples on a timer — won't block the main thread
+    this.processIntervalId = window.setInterval(() => {
+      this.processAccumulated();
+    }, PROCESS_INTERVAL_MS);
   }
 
   private resetState(): void {
     this.state = DecoderState.WAIT_PREAMBLE;
     this.bitBuffer = [];
-    this.preambleCount = 0;
     this.dataLength = 0;
     this.bytesCollected = [];
-    this.sampleOffset = 0;
   }
 
-  private processSamples(samples: Float32Array): void {
-    // Append to our sample buffer
-    const combined = new Float32Array(
-      this.sampleBuffer.length - this.sampleOffset + samples.length
-    );
-    combined.set(
-      this.sampleBuffer.subarray(this.sampleOffset),
-      0
-    );
-    combined.set(samples, this.sampleBuffer.length - this.sampleOffset);
-    this.sampleBuffer = combined;
-    this.sampleOffset = 0;
+  private availableSamples(): number {
+    return (this.writePos - this.readPos + RING_BUFFER_SIZE) & (RING_BUFFER_SIZE - 1);
+  }
 
-    // Process complete bit periods
-    while (this.sampleOffset + SAMPLES_PER_BIT <= this.sampleBuffer.length) {
-      const bit = this.decodeBit(
-        this.sampleBuffer,
-        this.sampleOffset,
-        SAMPLES_PER_BIT
-      );
-      this.sampleOffset += SAMPLES_PER_BIT;
+  private processAccumulated(): void {
+    // Process up to a limited number of bits per interval to avoid blocking
+    const maxBits = 300; // ~300 bits = enough for a full frame
+    let bitsProcessed = 0;
+
+    while (this.availableSamples() >= SAMPLES_PER_BIT && bitsProcessed < maxBits) {
+      const bit = this.decodeBitFromRing();
+      bitsProcessed++;
 
       if (bit === -1) {
-        // Silence/noise — reset
         this.resetState();
         continue;
       }
@@ -257,35 +264,51 @@ export class AudioDecoder {
       this.feedBit(bit);
     }
 
-    // Trim processed samples
-    if (this.sampleOffset > 0) {
-      this.sampleBuffer = this.sampleBuffer.slice(this.sampleOffset);
-      this.sampleOffset = 0;
+    // If we're falling behind, skip ahead to stay near real-time
+    if (this.availableSamples() > SAMPLE_RATE) {
+      this.readPos = (this.writePos - SAMPLES_PER_BIT * 10 + RING_BUFFER_SIZE) & (RING_BUFFER_SIZE - 1);
+      this.resetState();
     }
   }
 
-  private decodeBit(
-    samples: Float32Array,
-    offset: number,
-    length: number
-  ): number {
-    const mag0 = goertzelMagnitude(samples, offset, length, FREQ_ZERO, SAMPLE_RATE);
-    const mag1 = goertzelMagnitude(samples, offset, length, FREQ_ONE, SAMPLE_RATE);
+  private decodeBitFromRing(): number {
+    const mag0 = this.goertzelFromRing(FREQ_ZERO);
+    const mag1 = this.goertzelFromRing(FREQ_ONE);
+
+    // Advance read position
+    this.readPos = (this.readPos + SAMPLES_PER_BIT) & (RING_BUFFER_SIZE - 1);
 
     const maxMag = Math.max(mag0, mag1);
-    if (maxMag < this.noiseThreshold) return -1; // silence
+    if (maxMag < NOISE_THRESHOLD) return -1;
 
     return mag1 > mag0 ? 1 : 0;
+  }
+
+  private goertzelFromRing(targetFreq: number): number {
+    const k = Math.round((SAMPLES_PER_BIT * targetFreq) / SAMPLE_RATE);
+    const w = (2 * Math.PI * k) / SAMPLES_PER_BIT;
+    const coeff = 2 * Math.cos(w);
+
+    let s0 = 0;
+    let s1 = 0;
+    let s2 = 0;
+
+    for (let i = 0; i < SAMPLES_PER_BIT; i++) {
+      const idx = (this.readPos + i) & (RING_BUFFER_SIZE - 1);
+      s0 = this.ringBuffer[idx] + coeff * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
+
+    return Math.sqrt(s1 * s1 + s2 * s2 - coeff * s1 * s2);
   }
 
   private feedBit(bit: number): void {
     switch (this.state) {
       case DecoderState.WAIT_PREAMBLE:
-        // Look for alternating 10101010 pattern
         this.bitBuffer.push(bit);
         if (this.bitBuffer.length > 16) this.bitBuffer.shift();
 
-        // Check for at least 12 alternating bits
         if (this.bitBuffer.length >= 12) {
           let alternating = true;
           for (let i = this.bitBuffer.length - 12; i < this.bitBuffer.length - 1; i++) {
@@ -297,7 +320,6 @@ export class AudioDecoder {
           if (alternating) {
             this.state = DecoderState.WAIT_SYNC;
             this.bitBuffer = [];
-            this.preambleCount = 0;
           }
         }
         break;
@@ -310,10 +332,8 @@ export class AudioDecoder {
             this.state = DecoderState.READ_LENGTH;
             this.bitBuffer = [];
           } else if (byte === PREAMBLE_BYTE) {
-            // Still in preamble, keep waiting
             this.bitBuffer = [];
           } else {
-            // Bad sync, reset
             this.resetState();
           }
         }
@@ -326,7 +346,7 @@ export class AudioDecoder {
           this.bitBuffer = [];
           this.bytesCollected = [];
           if (this.dataLength === 0 || this.dataLength > 200) {
-            this.resetState(); // sanity check
+            this.resetState();
           } else {
             this.state = DecoderState.READ_DATA;
           }
@@ -339,7 +359,6 @@ export class AudioDecoder {
           this.bytesCollected.push(this.bitsToValue(this.bitBuffer));
           this.bitBuffer = [];
 
-          // Need dataLength bytes of data + 1 byte CRC
           if (this.bytesCollected.length === this.dataLength + 1) {
             this.validateFrame();
             this.resetState();
@@ -361,20 +380,25 @@ export class AudioDecoder {
     const data = new Uint8Array(this.bytesCollected.slice(0, this.dataLength));
     const receivedCrc = this.bytesCollected[this.dataLength];
 
-    // CRC over [length, data...]
     const crcInput = new Uint8Array(1 + this.dataLength);
     crcInput[0] = this.dataLength;
     crcInput.set(data, 1);
 
-    if (crc8(crcInput) !== receivedCrc) return; // CRC mismatch, discard
+    if (crc8(crcInput) !== receivedCrc) return;
 
-    // Decode bitfield — totalChunks = dataLength * 8
+    // Don't fire feedback in the first 2 seconds (avoid false positives from startup noise)
+    if (Date.now() - this.startTime < 2000) return;
+
     const totalChunks = this.dataLength * 8;
     const received = decodeBitfieldRaw(data, totalChunks);
     this.onFeedback(received, totalChunks);
   }
 
   stop(): void {
+    if (this.processIntervalId !== null) {
+      clearInterval(this.processIntervalId);
+      this.processIntervalId = null;
+    }
     if (this.processor) {
       this.processor.disconnect();
       this.processor = null;

@@ -53,12 +53,6 @@
             </svg>
             Receive
           </button>
-          <button id="tab-smart" class="tab" data-tab="smart">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-            Smart
-          </button>
         </div>
 
         <!-- ==================== SEND PANEL ==================== -->
@@ -124,6 +118,15 @@
               </div>
             </div>
 
+            <label class="toggle-row" id="send-audio-toggle">
+              <span class="toggle-label">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                Audio Feedback
+              </span>
+              <input type="checkbox" id="send-audio-enabled" />
+              <span class="toggle-switch"></span>
+            </label>
+
             <div class="qr-area">
               <canvas id="qr-canvas"></canvas>
               <div class="qr-overlay" id="qr-overlay">
@@ -166,6 +169,14 @@
               </svg>
               <p>Point your camera at the sender's QR codes to receive a file.</p>
             </div>
+            <label class="toggle-row" id="recv-audio-toggle">
+              <span class="toggle-label">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                Audio Feedback (play tones for sender)
+              </span>
+              <input type="checkbox" id="recv-audio-enabled" />
+              <span class="toggle-switch"></span>
+            </label>
             <button id="btn-start-scan" class="btn btn-primary btn-large">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -256,161 +267,10 @@
           </div>
         </div>
 
-        <!-- ==================== SMART PANEL ==================== -->
-        <div id="smart-panel" class="panel">
-          <div class="mode-toggle">
-            <button id="smart-mode-send" class="mode-btn active">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-              Smart Send
-            </button>
-            <button id="smart-mode-recv" class="mode-btn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-              Smart Receive
-            </button>
-          </div>
-
-          <!-- SMART SEND -->
-          <div id="smart-send-view">
-            <div id="smart-send-idle">
-              <div id="smart-drop-zone" class="drop-zone">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
-                </svg>
-                <p class="drop-text">Drop a file or <span class="link">click to select</span></p>
-                <input type="file" id="smart-file-input" />
-              </div>
-            </div>
-
-            <div id="smart-send-active" class="hidden">
-              <div class="file-badge">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                <span id="smart-send-filename"></span>
-                <span class="file-size" id="smart-send-filesize"></span>
-              </div>
-
-              <div class="smart-split">
-                <div class="smart-section">
-                  <div class="smart-label">Data QR</div>
-                  <div class="qr-area qr-area-compact">
-                    <canvas id="smart-send-qr"></canvas>
-                  </div>
-                </div>
-                <div class="smart-section">
-                  <div class="smart-label">Audio Feedback</div>
-                  <div class="audio-status" id="smart-audio-listen-status">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" y1="19" x2="12" y2="23" />
-                      <line x1="8" y1="23" x2="16" y2="23" />
-                    </svg>
-                    <span>Listening for audio feedback...</span>
-                  </div>
-                  <div id="smart-feedback-status" class="feedback-badge">Waiting for feedback...</div>
-                </div>
-              </div>
-
-              <div class="progress-section">
-                <div class="progress-text">
-                  Remaining: <strong id="smart-send-remaining">0</strong> / <strong id="smart-send-total">0</strong>
-                </div>
-                <div class="progress-bar">
-                  <div id="smart-send-progress" class="progress-fill"></div>
-                </div>
-              </div>
-
-              <div class="controls">
-                <button id="smart-btn-play" class="btn btn-primary">
-                  <svg id="smart-icon-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  <svg id="smart-icon-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="hidden"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                  <span id="smart-play-label">Start</span>
-                </button>
-                <button id="smart-btn-stop" class="btn btn-secondary">Stop</button>
-              </div>
-
-              <div id="smart-send-complete" class="complete-section hidden">
-                <div class="success-ring">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                    <polyline points="22 4 12 14.01 9 11.01" />
-                  </svg>
-                </div>
-                <h2>Transfer Complete!</h2>
-                <p>All chunks received by the other device.</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- SMART RECEIVE -->
-          <div id="smart-recv-view" class="hidden">
-            <div id="smart-recv-idle" class="receive-intro" style="text-align:center">
-              <p>Point your camera at the sender's QR codes. Your feedback QR will appear below.</p>
-              <button id="smart-btn-start-recv" class="btn btn-primary btn-large" style="margin-top:16px">Start Smart Receive</button>
-            </div>
-
-            <div id="smart-recv-active" class="hidden">
-              <div class="smart-split">
-                <div class="smart-section">
-                  <div class="smart-label">Scanning Data QR</div>
-                  <div class="smart-camera">
-                    <video id="smart-recv-camera" autoplay playsinline muted></video>
-                    <canvas id="smart-recv-scan"></canvas>
-                    <div class="scan-line"></div>
-                    <button id="btn-flip-smart-recv" class="btn-flip" title="Flip camera">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16v4a2 2 0 0 1-2 2h-4"/><polyline points="14 22 20 22 20 16"/><path d="M4 8V4a2 2 0 0 1 2-2h4"/><polyline points="10 2 4 2 4 8"/><path d="M21 12A9 9 0 0 0 6 5.3"/><path d="M3 12a9 9 0 0 0 15 6.7"/></svg>
-                    </button>
-                  </div>
-                </div>
-                <div class="smart-section">
-                  <div class="smart-label">Audio Feedback</div>
-                  <div class="audio-status" id="smart-audio-play-status">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    </svg>
-                    <span>Playing feedback tones...</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="progress-section">
-                <div class="progress-text">
-                  <strong id="smart-recv-current">0</strong> / <strong id="smart-recv-total">0</strong> chunks
-                </div>
-                <div class="progress-bar">
-                  <div id="smart-recv-progress" class="progress-fill"></div>
-                </div>
-              </div>
-
-              <div id="smart-chunk-grid" class="chunk-grid"></div>
-
-              <div id="smart-recv-complete" class="complete-section hidden">
-                <div class="success-ring">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                    <polyline points="22 4 12 14.01 9 11.01" />
-                  </svg>
-                </div>
-                <h2>Transfer Complete!</h2>
-                <p id="smart-recv-summary"></p>
-                <p class="crc-badge" id="smart-recv-crc"></p>
-                <button id="smart-btn-download" class="btn btn-primary btn-large">Download File</button>
-              </div>
-
-              <div class="receive-controls">
-                <button id="smart-btn-stop-recv" class="btn btn-secondary">Stop</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <footer>
           <p>&copy; Aionda GmbH &mdash; <a href="https://aionda.com/impressum/" target="_blank" rel="noopener" class="footer-link">Imprint</a></p>
           <p>No server, no cloud, no tracking. 100% offline.</p>
-          <p>v1.4.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
+          <p>v1.5.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
         </footer>
       </div>
     </div>
