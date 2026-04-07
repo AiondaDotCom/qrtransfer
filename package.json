@@ -1,6 +1,6 @@
 {
   "name": "qrtransfer",
-  "version": "3.4.0",
+  "version": "4.0.0",
   "description": "Offline file transfer via QR codes - single HTML file, no server required",
   "private": true,
   "scripts": {
@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "ggwave": "^0.4.0",
     "jsqr": "^1.4.0",
     "pako": "^2.1.0",
     "qrcode": "^1.5.4"

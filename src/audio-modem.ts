@@ -1,8 +1,8 @@
 import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 
 // FSK Parameters (Bell 202 Pro — optimized for speaker-to-mic)
-export const FREQ_ZERO = 1000;  // pleasant mid-range tones
-export const FREQ_ONE = 1750;   // ratio 1.75 (non-harmonic), 750 Hz apart
+export const FREQ_ZERO = 2000;  // proven through speaker→mic (CRC OK)
+export const FREQ_ONE = 3500;   // ratio 1.75, 1500 Hz apart, non-harmonic
 export const BAUD_RATE = 10;    // 100ms per bit — very robust
 export const SAMPLE_RATE = 44100;
 export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE);
@@ -260,34 +260,25 @@ export class AudioEncoder {
     await this.ctx.resume();
     const actualRate = this.ctx.sampleRate;
 
-    // Sliding window: start at first missing chunk, 32-chunk bitfield + offset
-    let windowStart = 0;
+    // High water mark: first chunk NOT received (= everything before is done)
+    let highWater = 0;
     for (let i = 0; i < totalChunks; i++) {
-      if (!received.has(i)) { windowStart = i; break; }
+      if (!received.has(i)) break;
+      highWater = i + 1;
     }
-    if (received.size === totalChunks) windowStart = totalChunks;
 
-    const windowSize = 32;
-    const windowSet = new Set<number>();
-    for (let i = 0; i < windowSize && (windowStart + i) < totalChunks; i++) {
-      if (received.has(windowStart + i)) windowSet.add(i);
-    }
-    const bitfieldBytes = encodeBitfieldRaw(windowSet, windowSize);
-
-    // Fixed frame: [preamble×2][sync][offset 2B][bitfield 4B][CRC]
-    // No length byte — payload is always 6 bytes, known to both sides
-    const payload = new Uint8Array(6);
-    payload[0] = (windowStart >> 8) & 0xff;
-    payload[1] = windowStart & 0xff;
-    payload.set(bitfieldBytes, 2);
+    // Tiny frame: [preamble×4][sync][hwHi][hwLo][CRC] = 8 bytes only
+    const payload = new Uint8Array(2);
+    payload[0] = (highWater >> 8) & 0xff;
+    payload[1] = highWater & 0xff;
     const crcVal = crc8(payload);
 
-    const frame = new Uint8Array(4 + 1 + 6 + 1); // preamble×4 + sync + payload + crc
+    const frame = new Uint8Array(8);
     frame[0] = PREAMBLE_BYTE; frame[1] = PREAMBLE_BYTE;
     frame[2] = PREAMBLE_BYTE; frame[3] = PREAMBLE_BYTE;
     frame[4] = SYNC_WORD;
-    frame.set(payload, 5);
-    frame[11] = crcVal;
+    frame[5] = payload[0]; frame[6] = payload[1];
+    frame[7] = crcVal;
 
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -422,7 +413,7 @@ export class AudioDecoder {
       if (this.onMicLevel) this.onMicLevel(this.peakLevel);
       if (this.onDebug) {
         const stateNames = ['PREAMBLE', 'SYNC', 'LENGTH', 'DATA'];
-        const extra = this.state === 3 ? ` len:${this.dataLength} got:${this.bytesCollected.length}/${this.dataLength + 1}` : '';
+        const extra = this.state === 3 ? ` got:${this.bytesCollected.length}/3` : '';
         this.onDebug(
           `Bell202 ${stateNames[this.state]} | bits:${this.bitsDecoded} pre:${this.preambleFound} crc:${this.crcOk}ok/${this.crcFails}fail${extra}`
         );
@@ -524,7 +515,8 @@ export class AudioDecoder {
           this.bytesCollected.push(this.bitsToValue(this.bitBuffer));
           this.bitBuffer = [];
           // Read 6 data + 1 CRC = 7 bytes
-          if (this.bytesCollected.length === 7) {
+          // 2 payload + 1 CRC = 3 bytes
+          if (this.bytesCollected.length === 3) {
             this.validateFrame();
             this.resetState();
           }
@@ -540,28 +532,23 @@ export class AudioDecoder {
   }
 
   private validateFrame(): void {
-    // 7 bytes: [6 payload] [1 CRC]
-    const payload = new Uint8Array(this.bytesCollected.slice(0, 6));
-    const receivedCrc = this.bytesCollected[6];
+    // 3 bytes: [2 payload] [1 CRC]
+    const payload = new Uint8Array(this.bytesCollected.slice(0, 2));
+    const receivedCrc = this.bytesCollected[2];
     const expectedCrc = crc8(payload);
 
-    console.log(`[MODEM] ${((Date.now()-this.startTime)/1000).toFixed(1)}s Frame: [${Array.from(payload).map(x=>'0x'+x.toString(16).padStart(2,'0')).join(',')}] CRC: ${expectedCrc===receivedCrc?'OK':'FAIL'}`);
+    console.log(`[MODEM] ${((Date.now()-this.startTime)/1000).toFixed(1)}s Frame: [0x${payload[0].toString(16)},0x${payload[1].toString(16)}] CRC: ${expectedCrc===receivedCrc?'OK':'FAIL'}`);
 
     if (expectedCrc !== receivedCrc) { this.crcFails++; return; }
 
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
 
-    // Parse: [offset_hi][offset_lo][bitfield 4 bytes]
-    const windowStart = (payload[0] << 8) | payload[1];
-    const bitfield = payload.slice(2);
-    const windowReceived = decodeBitfieldRaw(bitfield, 32);
-
+    // High water mark: chunks 0 through highWater-1 are received
+    const highWater = (payload[0] << 8) | payload[1];
     const received = new Set<number>();
-    for (const relIdx of windowReceived) {
-      received.add(windowStart + relIdx);
-    }
-    this.onFeedback(received, windowStart + 32);
+    for (let i = 0; i < highWater; i++) received.add(i);
+    this.onFeedback(received, highWater);
   }
 
   stop(): void {
