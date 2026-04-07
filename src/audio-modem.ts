@@ -166,7 +166,7 @@ export class AudioEncoder {
     // ggwave.encode returns Int8Array at default sample rate (48000)
     const waveform = this.ggwave.encode(
       this.instance, payload,
-      this.ggwave.ProtocolId.GGWAVE_PROTOCOL_AUDIBLE_FAST, 50
+      this.ggwave.ProtocolId.GGWAVE_PROTOCOL_DT_NORMAL, 50
     );
 
     this.ctx = new AudioContext();
