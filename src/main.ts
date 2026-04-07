@@ -218,11 +218,15 @@ async function handleFile(file: File) {
       sendProgress.style.width = `${(1 / total) * 100}%`;
       qrOverlay.classList.remove('hidden');
       updatePlayButton();
+      // Initialize send chunk grid
+      initSendChunkGrid(total);
     },
     onProgress: (current, total) => {
       sendCurrent.textContent = String(current + 1);
       sendTotal.textContent = String(total);
       sendProgress.style.width = `${((current + 1) / total) * 100}%`;
+      // Highlight current chunk being sent
+      highlightSendingChunk(current, total);
     },
     onFeedbackReceived: (receivedCount, total, receivedSet) => {
       chunkCount.textContent = `${total - receivedCount} remaining`;
@@ -279,6 +283,23 @@ btnPlay.addEventListener('click', async () => {
     sender.play();
   }
   updatePlayButton();
+});
+
+// Allow toggling audio feedback while playing
+sendAudioEnabled.addEventListener('change', async () => {
+  if (!sender) return;
+  if (sendAudioEnabled.checked && !sender.isListening) {
+    try {
+      await sender.startListening();
+      audioIndicator.classList.remove('hidden');
+      audioIndicatorText.textContent = 'Listening for audio feedback...';
+      audioIndicatorDetail.textContent = '';
+    } catch { /* mic optional */ }
+  } else if (!sendAudioEnabled.checked && sender.isListening) {
+    sender.stopListening();
+    audioIndicator.classList.add('hidden');
+    sendChunkGrid.classList.add('hidden');
+  }
 });
 
 btnPrev.addEventListener('click', () => {
@@ -389,6 +410,16 @@ btnStartScan.addEventListener('click', async () => {
     showError(`Camera access denied: ${err}`);
     receiveIdle.classList.remove('hidden');
     receiveActive.classList.add('hidden');
+  }
+});
+
+// Allow toggling audio feedback while receiving
+recvAudioEnabled.addEventListener('change', () => {
+  if (!receiver) return;
+  if (recvAudioEnabled.checked && !receiver.isAudioFeedbackActive) {
+    receiver.startAudioFeedback();
+  } else if (!recvAudioEnabled.checked && receiver.isAudioFeedbackActive) {
+    receiver.stopAudioFeedback();
   }
 });
 
@@ -551,6 +582,27 @@ btnDownload.addEventListener('click', () => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 });
+
+function initSendChunkGrid(total: number) {
+  sendChunkGrid.classList.remove('hidden');
+  sendChunkGrid.innerHTML = '';
+  for (let i = 0; i < total; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'chunk-cell';
+    cell.title = `Chunk ${i}`;
+    sendChunkGrid.appendChild(cell);
+  }
+}
+
+function highlightSendingChunk(current: number, total: number) {
+  if (sendChunkGrid.children.length !== total) return;
+  const prev = sendChunkGrid.querySelector('.sending');
+  if (prev) prev.classList.remove('sending');
+  const cell = sendChunkGrid.children[current] as HTMLElement;
+  if (cell && !cell.classList.contains('received')) {
+    cell.classList.add('sending');
+  }
+}
 
 function updateSendChunkGrid(total: number, received: Set<number>) {
   sendChunkGrid.classList.remove('hidden');

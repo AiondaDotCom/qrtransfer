@@ -3,9 +3,9 @@ import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 // FSK Parameters
 export const FREQ_ZERO = 1200;
 export const FREQ_ONE = 2400;
-export const BAUD_RATE = 100;
+export const BAUD_RATE = 50;
 export const SAMPLE_RATE = 44100;
-export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE); // 441
+export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE); // 882
 export const PREAMBLE_BYTE = 0xaa;
 export const SYNC_WORD = 0xd5;
 export const INTER_FRAME_GAP_MS = 50;

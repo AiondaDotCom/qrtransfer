@@ -126,6 +126,10 @@ export class Receiver {
     }
   }
 
+  get isAudioFeedbackActive(): boolean {
+    return this.encoder !== null;
+  }
+
   async flipCamera(): Promise<void> {
     this.facing = this.facing === 'environment' ? 'user' : 'environment';
     if (this.stream) {
