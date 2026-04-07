@@ -630,6 +630,17 @@ footer {
   color: var(--text-muted);
 }
 
+.footer-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.footer-link:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+
 /* ===== Utilities ===== */
 .hidden {
   display: none !important;
