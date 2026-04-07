@@ -3,7 +3,7 @@ import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 // FSK Parameters (Bell 202)
 export const FREQ_ZERO = 1200;
 export const FREQ_ONE = 2400;
-export const BAUD_RATE = 25;
+export const BAUD_RATE = 50;
 export const SAMPLE_RATE = 44100;
 export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE);
 export const PREAMBLE_BYTE = 0xaa;
