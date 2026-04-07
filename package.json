@@ -1,6 +1,6 @@
 {
   "name": "qrtransfer",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Offline file transfer via QR codes - single HTML file, no server required",
   "private": true,
   "scripts": {
