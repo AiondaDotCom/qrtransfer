@@ -2,6 +2,8 @@
 
 Offline file transfer via QR codes. One single HTML file — no server, no cloud, no tracking.
 
+**[Try it live](https://aiondadotcom.github.io/qrtransfer/)** | [Download HTML](https://github.com/AiondaDotCom/qrtransfer/releases/latest)
+
 ## How it works
 
 1. Open `index.html` on both devices (sender and receiver)
