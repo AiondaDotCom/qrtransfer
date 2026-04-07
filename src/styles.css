@@ -254,12 +254,14 @@ header {
 
 .complete-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
 }
 
 .complete-actions .btn {
   flex: 1;
+  min-width: 120px;
 }
 
 /* ===== Toggle Row ===== */
@@ -321,6 +323,43 @@ header {
 .toggle-row input:checked ~ .toggle-switch::after {
   left: 21px;
   background: white;
+}
+
+/* ===== Audio Indicator ===== */
+.audio-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+
+.audio-indicator.received {
+  border-color: var(--success-glow);
+  color: var(--success);
+  animation: feedbackPulse 600ms ease;
+}
+
+.audio-indicator-icon {
+  display: flex;
+  align-items: center;
+}
+
+.audio-indicator-detail {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+@keyframes feedbackPulse {
+  0% { background: rgba(16, 185, 129, 0.15); }
+  100% { background: var(--bg-secondary); }
 }
 
 /* ===== Drop Zone ===== */
@@ -987,5 +1026,18 @@ footer {
 
   .qr-area {
     padding: 16px;
+  }
+
+  .btn-large {
+    padding: 12px 16px;
+    font-size: 0.85rem;
+  }
+
+  .complete-actions {
+    flex-direction: column;
+  }
+
+  .complete-actions .btn {
+    min-width: unset;
   }
 }

@@ -22,6 +22,9 @@ const btnGenerateQR = $<HTMLButtonElement>('btn-generate-qr');
 // Audio feedback toggles
 const sendAudioEnabled = $<HTMLInputElement>('send-audio-enabled');
 const recvAudioEnabled = $<HTMLInputElement>('recv-audio-enabled');
+const audioIndicator = $('audio-feedback-indicator');
+const audioIndicatorText = $('audio-indicator-text');
+const audioIndicatorDetail = $('audio-indicator-detail');
 
 // Send elements
 const dropZone = $('drop-zone');
@@ -221,9 +224,16 @@ async function handleFile(file: File) {
     },
     onFeedbackReceived: (received, total) => {
       chunkCount.textContent = `${total - received} remaining`;
+      audioIndicatorText.textContent = 'Feedback received!';
+      audioIndicatorDetail.textContent = `${received}/${total}`;
+      audioIndicator.classList.add('received');
+      setTimeout(() => audioIndicator.classList.remove('received'), 600);
     },
     onTransferComplete: () => {
       chunkCount.textContent = 'Transfer complete!';
+      audioIndicatorText.textContent = 'All chunks confirmed!';
+      audioIndicatorDetail.textContent = '';
+      audioIndicator.classList.add('received');
     },
   });
 
@@ -242,6 +252,9 @@ btnPlay.addEventListener('click', async () => {
     if (sendAudioEnabled.checked && !sender.isListening) {
       try {
         await sender.startListening();
+        audioIndicator.classList.remove('hidden');
+        audioIndicatorText.textContent = 'Listening for audio feedback...';
+        audioIndicatorDetail.textContent = '';
       } catch { /* mic optional */ }
     }
     sender.play();
