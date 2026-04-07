@@ -7,6 +7,7 @@ export interface ChunkPacket {
   n?: string;
   s?: number;
   h?: string;
+  tp?: string; // "t" = text, absent = file
   d: string;
 }
 
@@ -15,6 +16,7 @@ export interface TransferMetadata {
   fileSize: number;
   hash: string;
   totalChunks: number;
+  type: 'text' | 'file';
 }
 
 // CRC32 lookup table
@@ -173,8 +175,41 @@ export function assembleChunks(packets: Map<number, ChunkPacket>): AssemblyResul
       fileSize: chunk0.s,
       hash: chunk0.h,
       totalChunks,
+      type: chunk0.tp === 't' ? 'text' : 'file',
     },
   };
+}
+
+export function createTextChunks(
+  text: string,
+  chunkSize: number = 900
+): ChunkPacket[] {
+  const data = new TextEncoder().encode(text);
+  const compressed = compress(data);
+  const b64 = toBase64(compressed);
+  const hash = crc32Hex(data);
+
+  const totalChunks = Math.max(1, Math.ceil(b64.length / chunkSize));
+  const packets: ChunkPacket[] = [];
+
+  for (let i = 0; i < totalChunks; i++) {
+    const chunk = b64.slice(i * chunkSize, (i + 1) * chunkSize);
+    const packet: ChunkPacket = {
+      v: 1,
+      i,
+      t: totalChunks,
+      d: chunk,
+    };
+    if (i === 0) {
+      packet.tp = 't';
+      packet.n = 'text';
+      packet.s = data.length;
+      packet.h = hash;
+    }
+    packets.push(packet);
+  }
+
+  return packets;
 }
 
 export function formatFileSize(bytes: number): string {

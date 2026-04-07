@@ -147,6 +147,116 @@ header {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ===== Mode Toggle ===== */
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  margin-bottom: 16px;
+}
+
+.mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.mode-btn:hover {
+  color: var(--text-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.mode-btn.active {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--accent-light);
+}
+
+/* ===== Text Input ===== */
+.text-input-zone {
+  margin-bottom: 16px;
+}
+
+.text-input-zone textarea {
+  width: 100%;
+  padding: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.text-input-zone textarea:focus {
+  border-color: var(--accent);
+}
+
+.text-input-zone textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.text-input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.text-char-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Text Result ===== */
+.text-result {
+  text-align: left;
+  margin-bottom: 16px;
+}
+
+.text-result pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.text-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.text-actions .btn {
+  flex: 1;
+}
+
 /* ===== Drop Zone ===== */
 .drop-zone {
   border: 2px dashed var(--border);

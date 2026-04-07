@@ -57,6 +57,17 @@
 
         <!-- ==================== SEND PANEL ==================== -->
         <div id="send-panel" class="panel active">
+          <div class="mode-toggle">
+            <button id="mode-file" class="mode-btn active">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              File
+            </button>
+            <button id="mode-text" class="mode-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              Text
+            </button>
+          </div>
+
           <div id="drop-zone" class="drop-zone">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -66,6 +77,17 @@
             <p class="drop-text">Drop a file here or <span class="link">click to select</span></p>
             <p class="drop-hint">Recommended: files under 100 KB for fast transfer</p>
             <input type="file" id="file-input" />
+          </div>
+
+          <div id="text-input-zone" class="text-input-zone hidden">
+            <textarea id="text-input" placeholder="Paste text, links, or notes here..." rows="6"></textarea>
+            <div class="text-input-footer">
+              <span id="text-char-count" class="text-char-count">0 characters</span>
+              <button id="btn-generate-qr" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                Generate QR
+              </button>
+            </div>
           </div>
 
           <div id="send-active" class="hidden">
@@ -188,6 +210,19 @@
               <h2>Transfer Complete!</h2>
               <p id="recv-summary"></p>
               <p class="crc-badge" id="recv-crc"></p>
+              <div id="text-result" class="text-result hidden">
+                <pre id="text-content"></pre>
+                <div class="text-actions">
+                  <button id="btn-copy" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <span id="copy-label">Copy to Clipboard</span>
+                  </button>
+                  <button id="btn-resend" class="btn btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                    Re-send as QR
+                  </button>
+                </div>
+              </div>
               <button id="btn-download" class="btn btn-primary btn-large">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

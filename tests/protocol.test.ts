@@ -7,6 +7,7 @@ import {
   compress,
   decompress,
   createChunks,
+  createTextChunks,
   serializePacket,
   parsePacket,
   assembleChunks,
@@ -382,6 +383,57 @@ describe('end-to-end', () => {
         expect(result.data).toEqual(data);
         expect(result.metadata.filename).toBe(name);
       }
+    }
+  });
+
+  it('round-trips text via createTextChunks', () => {
+    const text = 'https://example.com/some/path?foo=bar&baz=123\nHello World!\nAnother line of text.';
+    const chunks = createTextChunks(text, 500);
+
+    expect(chunks[0].tp).toBe('t');
+    expect(chunks[0].n).toBe('text');
+
+    const map = new Map<number, ChunkPacket>();
+    for (const chunk of chunks) {
+      map.set(chunk.i, chunk);
+    }
+    const result = assembleChunks(map);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const decoded = new TextDecoder().decode(result.data);
+      expect(decoded).toBe(text);
+      expect(result.metadata.type).toBe('text');
+    }
+  });
+
+  it('round-trips longer text with multiple chunks', () => {
+    // Use text with enough entropy that it doesn't compress to a single chunk
+    const text = Array.from({ length: 500 }, (_, i) => `Item #${i}: ${Math.random().toString(36).slice(2)}`).join('\n');
+    const chunks = createTextChunks(text, 200);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0].tp).toBe('t');
+
+    const map = new Map<number, ChunkPacket>();
+    for (const chunk of chunks) {
+      map.set(chunk.i, chunk);
+    }
+    const result = assembleChunks(map);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(new TextDecoder().decode(result.data)).toBe(text);
+      expect(result.metadata.type).toBe('text');
+    }
+  });
+
+  it('file transfers have type "file"', () => {
+    const data = new TextEncoder().encode('file content');
+    const chunks = createChunks({ name: 'test.txt', data }, 900);
+    const map = new Map<number, ChunkPacket>();
+    for (const chunk of chunks) map.set(chunk.i, chunk);
+    const result = assembleChunks(map);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.metadata.type).toBe('file');
     }
   });
 
