@@ -398,6 +398,7 @@ export class AudioDecoder {
           }
           if (alternating) {
             this.preambleFound++;
+            console.log(`[MODEM] Preamble #${this.preambleFound} found`);
             this.state = DecoderState.WAIT_SYNC;
             this.bitBuffer = [];
           }
@@ -410,7 +411,7 @@ export class AudioDecoder {
           const last8 = this.bitBuffer.slice(-8);
           const byte = this.bitsToValue(last8);
           if (byte === SYNC_WORD) {
-            // Skip READ_LENGTH — payload is always 6 bytes + 1 CRC = 7 bytes
+            console.log(`[MODEM] Sync found, reading 7 bytes...`);
             this.state = DecoderState.READ_DATA;
             this.dataLength = 6;
             this.bitBuffer = [];
@@ -446,8 +447,11 @@ export class AudioDecoder {
     // 7 bytes: [6 payload] [1 CRC]
     const payload = new Uint8Array(this.bytesCollected.slice(0, 6));
     const receivedCrc = this.bytesCollected[6];
+    const expectedCrc = crc8(payload);
 
-    if (crc8(payload) !== receivedCrc) { this.crcFails++; return; }
+    console.log(`[MODEM] Frame: [${Array.from(payload).map(x=>'0x'+x.toString(16).padStart(2,'0')).join(',')}] CRC: exp=0x${expectedCrc.toString(16)} got=0x${receivedCrc.toString(16)} ${expectedCrc===receivedCrc?'OK':'FAIL'}`);
+
+    if (expectedCrc !== receivedCrc) { this.crcFails++; return; }
 
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
