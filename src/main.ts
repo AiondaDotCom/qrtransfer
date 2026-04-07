@@ -1,6 +1,8 @@
 import './styles.css';
 import { Sender } from './sender';
 import { Receiver } from './receiver';
+import { SmartSender } from './smart-sender';
+import { SmartReceiver } from './smart-receiver';
 import { formatFileSize, TransferMetadata } from './protocol';
 
 // ===== DOM Elements =====
@@ -8,8 +10,10 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 
 const tabSend = $<HTMLButtonElement>('tab-send');
 const tabReceive = $<HTMLButtonElement>('tab-receive');
+const tabSmart = $<HTMLButtonElement>('tab-smart');
 const sendPanel = $('send-panel');
 const receivePanel = $('receive-panel');
+const smartPanel = $('smart-panel');
 
 // Send mode toggle
 const modeFile = $<HTMLButtonElement>('mode-file');
@@ -80,15 +84,18 @@ let receivedFileData: Uint8Array | null = null;
 let receivedFilename = '';
 
 // ===== Tab Switching =====
-function switchTab(tab: 'send' | 'receive') {
+function switchTab(tab: 'send' | 'receive' | 'smart') {
   tabSend.classList.toggle('active', tab === 'send');
   tabReceive.classList.toggle('active', tab === 'receive');
+  tabSmart.classList.toggle('active', tab === 'smart');
   sendPanel.classList.toggle('active', tab === 'send');
   receivePanel.classList.toggle('active', tab === 'receive');
+  smartPanel.classList.toggle('active', tab === 'smart');
 }
 
 tabSend.addEventListener('click', () => switchTab('send'));
 tabReceive.addEventListener('click', () => switchTab('receive'));
+tabSmart.addEventListener('click', () => switchTab('smart'));
 
 // ===== Send: Mode Toggle =====
 function switchSendMode(mode: 'file' | 'text') {
@@ -486,4 +493,225 @@ function showError(message: string) {
   setTimeout(() => {
     toast.remove();
   }, 5000);
+}
+
+// ===== Smart Transfer =====
+const smartModeSend = $<HTMLButtonElement>('smart-mode-send');
+const smartModeRecv = $<HTMLButtonElement>('smart-mode-recv');
+const smartSendView = $('smart-send-view');
+const smartRecvView = $('smart-recv-view');
+
+// Smart Send elements
+const smartDropZone = $('smart-drop-zone');
+const smartFileInput = $<HTMLInputElement>('smart-file-input');
+const smartSendIdle = $('smart-send-idle');
+const smartSendActive = $('smart-send-active');
+const smartSendFilename = $('smart-send-filename');
+const smartSendFilesize = $('smart-send-filesize');
+const smartSendQr = $<HTMLCanvasElement>('smart-send-qr');
+const smartSendCamera = $<HTMLVideoElement>('smart-send-camera');
+const smartSendScan = $<HTMLCanvasElement>('smart-send-scan');
+const smartFeedbackStatus = $('smart-feedback-status');
+const smartSendRemaining = $('smart-send-remaining');
+const smartSendTotal = $('smart-send-total');
+const smartSendProgress = $('smart-send-progress');
+const smartBtnPlay = $<HTMLButtonElement>('smart-btn-play');
+const smartIconPlay = $('smart-icon-play');
+const smartIconPause = $('smart-icon-pause');
+const smartPlayLabel = $('smart-play-label');
+const smartBtnStop = $<HTMLButtonElement>('smart-btn-stop');
+const smartSendComplete = $('smart-send-complete');
+
+// Smart Receive elements
+const smartRecvIdle = $('smart-recv-idle');
+const smartRecvActive = $('smart-recv-active');
+const smartBtnStartRecv = $<HTMLButtonElement>('smart-btn-start-recv');
+const smartRecvCamera = $<HTMLVideoElement>('smart-recv-camera');
+const smartRecvScan = $<HTMLCanvasElement>('smart-recv-scan');
+const smartFeedbackQr = $<HTMLCanvasElement>('smart-feedback-qr');
+const smartRecvCurrent = $('smart-recv-current');
+const smartRecvTotal = $('smart-recv-total');
+const smartRecvProgress = $('smart-recv-progress');
+const smartChunkGrid = $('smart-chunk-grid');
+const smartRecvComplete = $('smart-recv-complete');
+const smartRecvSummary = $('smart-recv-summary');
+const smartRecvCrc = $('smart-recv-crc');
+const smartBtnDownload = $<HTMLButtonElement>('smart-btn-download');
+const smartBtnStopRecv = $<HTMLButtonElement>('smart-btn-stop-recv');
+
+let smartSender: SmartSender | null = null;
+let smartReceiver: SmartReceiver | null = null;
+
+// Smart mode toggle
+smartModeSend.addEventListener('click', () => {
+  smartModeSend.classList.add('active');
+  smartModeRecv.classList.remove('active');
+  smartSendView.classList.remove('hidden');
+  smartRecvView.classList.add('hidden');
+});
+
+smartModeRecv.addEventListener('click', () => {
+  smartModeRecv.classList.add('active');
+  smartModeSend.classList.remove('active');
+  smartRecvView.classList.remove('hidden');
+  smartSendView.classList.add('hidden');
+});
+
+// Smart Send: file selection
+smartDropZone.addEventListener('click', () => smartFileInput.click());
+smartFileInput.addEventListener('change', () => {
+  if (smartFileInput.files && smartFileInput.files[0]) {
+    handleSmartFile(smartFileInput.files[0]);
+  }
+});
+smartDropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  smartDropZone.classList.add('drag-over');
+});
+smartDropZone.addEventListener('dragleave', () => {
+  smartDropZone.classList.remove('drag-over');
+});
+smartDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  smartDropZone.classList.remove('drag-over');
+  if (e.dataTransfer?.files[0]) handleSmartFile(e.dataTransfer.files[0]);
+});
+
+async function handleSmartFile(file: File) {
+  if (smartSender) smartSender.destroy();
+
+  smartSender = new SmartSender(smartSendQr, smartSendCamera, smartSendScan, {
+    onReady: (total) => {
+      smartSendIdle.classList.add('hidden');
+      smartSendActive.classList.remove('hidden');
+      smartSendComplete.classList.add('hidden');
+      smartSendFilename.textContent = file.name;
+      smartSendFilesize.textContent = formatFileSize(file.size);
+      smartSendTotal.textContent = String(total);
+      smartSendRemaining.textContent = String(total);
+      smartSendProgress.style.width = '0%';
+    },
+    onProgress: (_current, total, remaining) => {
+      smartSendRemaining.textContent = String(remaining);
+      smartSendTotal.textContent = String(total);
+      const pct = ((total - remaining) / total) * 100;
+      smartSendProgress.style.width = `${pct}%`;
+    },
+    onFeedbackReceived: (received, total) => {
+      smartFeedbackStatus.textContent = `Feedback: ${received}/${total} received`;
+      smartFeedbackStatus.classList.add('active');
+    },
+    onComplete: () => {
+      smartSendComplete.classList.remove('hidden');
+      updateSmartPlayButton();
+    },
+  });
+
+  await smartSender.loadFile(file, 300);
+}
+
+// Smart Send: controls
+smartBtnPlay.addEventListener('click', async () => {
+  if (!smartSender) return;
+  if (smartSender.isPlaying) {
+    smartSender.pause();
+  } else {
+    try {
+      await smartSender.startCamera();
+    } catch { /* camera optional */ }
+    smartSender.play();
+  }
+  updateSmartPlayButton();
+});
+
+smartBtnStop.addEventListener('click', () => {
+  if (smartSender) smartSender.destroy();
+  smartSendIdle.classList.remove('hidden');
+  smartSendActive.classList.add('hidden');
+  smartFeedbackStatus.textContent = 'Waiting for feedback...';
+  smartFeedbackStatus.classList.remove('active');
+});
+
+function updateSmartPlayButton() {
+  if (!smartSender) return;
+  const playing = smartSender.isPlaying;
+  smartIconPlay.classList.toggle('hidden', playing);
+  smartIconPause.classList.toggle('hidden', !playing);
+  smartPlayLabel.textContent = playing ? 'Pause' : 'Start';
+}
+
+// Smart Receive
+smartBtnStartRecv.addEventListener('click', async () => {
+  smartRecvIdle.classList.add('hidden');
+  smartRecvActive.classList.remove('hidden');
+  smartRecvComplete.classList.add('hidden');
+
+  if (smartReceiver) smartReceiver.reset();
+
+  smartReceiver = new SmartReceiver(
+    smartRecvCamera,
+    smartRecvScan,
+    smartFeedbackQr,
+    {
+      onChunkReceived: (_index, total, received) => {
+        smartRecvCurrent.textContent = String(received);
+        smartRecvTotal.textContent = String(total);
+        smartRecvProgress.style.width = `${(received / total) * 100}%`;
+        updateSmartChunkGrid(total, smartReceiver!.receivedChunks);
+      },
+      onComplete: (data, metadata) => {
+        smartRecvComplete.classList.remove('hidden');
+        smartRecvSummary.textContent = `${metadata.filename} (${formatFileSize(metadata.fileSize)})`;
+        smartRecvCrc.textContent = `CRC32: ${metadata.hash}`;
+
+        const blob = new Blob([data as unknown as BlobPart]);
+        const fname = metadata.filename;
+        smartBtnDownload.onclick = () => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fname;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        };
+      },
+      onError: (error) => showError(error),
+      onFeedbackUpdated: () => {},
+    }
+  );
+
+  try {
+    await smartReceiver.start();
+  } catch (err) {
+    showError(`Camera access denied: ${err}`);
+    smartRecvIdle.classList.remove('hidden');
+    smartRecvActive.classList.add('hidden');
+  }
+});
+
+smartBtnStopRecv.addEventListener('click', () => {
+  if (smartReceiver) smartReceiver.stop();
+  smartRecvIdle.classList.remove('hidden');
+  smartRecvActive.classList.add('hidden');
+});
+
+function updateSmartChunkGrid(total: number, received: Set<number>) {
+  if (smartChunkGrid.children.length !== total) {
+    smartChunkGrid.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'chunk-cell';
+      smartChunkGrid.appendChild(cell);
+    }
+  }
+  const cells = smartChunkGrid.children;
+  for (let i = 0; i < total; i++) {
+    const cell = cells[i] as HTMLElement;
+    if (received.has(i) && !cell.classList.contains('received')) {
+      cell.classList.add('received', 'just-received');
+      setTimeout(() => cell.classList.remove('just-received'), 400);
+    }
+  }
 }

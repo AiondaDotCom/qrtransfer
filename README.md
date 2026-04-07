@@ -56,6 +56,65 @@ Files are compressed (gzip level 9), base64-encoded, and split into chunks. Each
 
 The receiver collects chunks in any order, reassembles, decompresses, and verifies the CRC32 checksum.
 
+## Smart Transfer (Bidirectional Feedback)
+
+Smart Transfer creates a **bidirectional QR channel** where the receiver tells the sender which chunks are still missing. The sender then skips already-received chunks, dramatically speeding up the transfer.
+
+### How it works
+
+The receiver encodes its progress as a compact bitfield (1 bit per chunk) in a feedback QR code. The sender's camera reads this feedback and adapts its playlist to only show missing chunks.
+
+### Laptop-to-Laptop (direct)
+
+Both screens face each other. Each device runs one role:
+
+```
+  Device A (Smart Send)           Device B (Smart Receive)
+  ┌──────────────────┐            ┌──────────────────┐
+  │   [DATA QR]      │ ◄─ scans  │   [CAMERA]       │
+  │   chunks 3,7,12  │           │   reading data   │
+  │                  │           │                  │
+  │   [CAMERA]       │  scans ─► │   [FEEDBACK QR]  │
+  │   reading fbk    │           │   "need 3,7,12"  │
+  └──────────────────┘            └──────────────────┘
+       ▲                                  │
+       │     feedback loop (continuous)    │
+       └──────────────────────────────────┘
+```
+
+### Phone as Bridge (between two laptops)
+
+The phone relays data between two laptops that can't see each other:
+
+```
+  Laptop A                Phone                  Laptop B
+  (Smart Send)          (relay)               (Smart Receive)
+  ┌──────────┐     ┌──────────────┐      ┌──────────┐
+  │[DATA QR] │◄cam │  [SCREEN]   │ cam►  │ [CAMERA] │
+  │          │     │  shows QR   │       │          │
+  │[CAMERA]  │◄scr │  [FEEDBACK] │ scr►  │[FEED QR] │
+  └──────────┘     └──────────────┘      └──────────┘
+```
+
+### Feedback Protocol
+
+The feedback QR contains a JSON packet with a bitfield:
+
+```json
+{
+  "v": 1,
+  "f": true,
+  "t": 500,
+  "r": 342,
+  "b": "base64-bitfield..."
+}
+```
+
+- `f: true` distinguishes feedback from data packets
+- `b` is a base64-encoded bitfield (1 bit per chunk, 1=received, 0=missing)
+- For 2000 chunks: ~334 bytes — fits in a single QR code
+- For 10,000 chunks: ~1,700 bytes — still fits
+
 ## Recommended file sizes
 
 | Size | Transfer time (est.) | Experience |
