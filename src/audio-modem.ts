@@ -272,7 +272,11 @@ export class AudioDecoder {
   private _isListening = false;
   private onFeedback: (received: Set<number>, totalChunks: number) => void;
   private onMicLevel: ((level: number) => void) | null = null;
+  private onDebug: ((info: string) => void) | null = null;
   private peakLevel = 0;
+  private bitsDecoded = 0;
+  private silenceCount = 0;
+  private preambleFound = 0;
 
   // Ring buffer for samples — no allocations during audio callback
   private ringBuffer = new Float32Array(RING_BUFFER_SIZE);
@@ -292,10 +296,12 @@ export class AudioDecoder {
 
   constructor(
     onFeedback: (received: Set<number>, totalChunks: number) => void,
-    onMicLevel?: (level: number) => void
+    onMicLevel?: (level: number) => void,
+    onDebug?: (info: string) => void
   ) {
     this.onFeedback = onFeedback;
     this.onMicLevel = onMicLevel ?? null;
+    this.onDebug = onDebug ?? null;
   }
 
   async start(): Promise<void> {
@@ -350,6 +356,14 @@ export class AudioDecoder {
       this.onMicLevel(this.peakLevel);
     }
 
+    // Report debug info
+    if (this.onDebug) {
+      const stateNames = ['PREAMBLE', 'SYNC', 'LENGTH', 'DATA'];
+      this.onDebug(
+        `${stateNames[this.state]} | bits:${this.bitsDecoded} sil:${this.silenceCount} pre:${this.preambleFound} buf:${this.availableSamples()} rate:${this.actualSampleRate} spb:${this.actualSamplesPerBit}`
+      );
+    }
+
     // Process up to a limited number of bits per interval to avoid blocking
     const maxBits = 200;
     let bitsProcessed = 0;
@@ -381,8 +395,12 @@ export class AudioDecoder {
     this.readPos = (this.readPos + this.actualSamplesPerBit) & (RING_BUFFER_SIZE - 1);
 
     const maxMag = Math.max(mag0, mag1);
-    if (maxMag < NOISE_THRESHOLD) return -1;
+    if (maxMag < NOISE_THRESHOLD) {
+      this.silenceCount++;
+      return -1;
+    }
 
+    this.bitsDecoded++;
     return mag1 > mag0 ? 1 : 0;
   }
 
@@ -421,6 +439,7 @@ export class AudioDecoder {
             }
           }
           if (alternating) {
+            this.preambleFound++;
             this.state = DecoderState.WAIT_SYNC;
             this.bitBuffer = [];
           }

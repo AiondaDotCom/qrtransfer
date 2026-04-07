@@ -25,6 +25,7 @@ const recvAudioEnabled = $<HTMLInputElement>('recv-audio-enabled');
 const audioIndicator = $('audio-feedback-indicator');
 const audioIndicatorText = $('audio-indicator-text');
 const audioIndicatorDetail = $('audio-indicator-detail');
+const audioDebug = $('audio-debug');
 
 // Send elements
 const dropZone = $('drop-zone');
@@ -236,12 +237,14 @@ async function handleFile(file: File) {
       audioIndicator.classList.add('received');
     },
     onMicLevel: (level) => {
-      // Show mic activity level — helps debug audio feedback issues
       if (!audioIndicator.classList.contains('hidden')) {
         const pct = Math.min(100, Math.round(level * 1000));
-        const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));
+        const bar = '\u2588'.repeat(Math.round(pct / 5)) + '\u2591'.repeat(20 - Math.round(pct / 5));
         audioIndicatorDetail.textContent = `Mic: ${bar} ${pct}%`;
       }
+    },
+    onAudioDebug: (info) => {
+      audioDebug.textContent = info;
     },
   });
 

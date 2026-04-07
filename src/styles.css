@@ -357,6 +357,15 @@ header {
   font-weight: 600;
 }
 
+.audio-debug {
+  width: 100%;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  margin-top: 4px;
+}
+
 @keyframes feedbackPulse {
   0% { background: rgba(16, 185, 129, 0.15); }
   100% { background: var(--bg-secondary); }
