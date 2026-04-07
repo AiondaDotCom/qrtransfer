@@ -362,7 +362,14 @@ export class AudioDecoder {
   }
 
   async start(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Disable browser audio processing that destroys FSK signals
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        autoGainControl: false,
+        noiseSuppression: false,
+      },
+    });
     this.ctx = new AudioContext();
     await this.ctx.resume(); // ensure not suspended
     this.actualSampleRate = this.ctx.sampleRate;
