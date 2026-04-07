@@ -3,9 +3,9 @@ import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 // FSK Parameters
 export const FREQ_ZERO = 1200;
 export const FREQ_ONE = 2400;
-export const BAUD_RATE = 300;
+export const BAUD_RATE = 100;
 export const SAMPLE_RATE = 44100;
-export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE); // 147
+export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE); // 441
 export const PREAMBLE_BYTE = 0xaa;
 export const SYNC_WORD = 0xd5;
 export const INTER_FRAME_GAP_MS = 50;
@@ -78,7 +78,7 @@ function generateWaveform(frame: Uint8Array): Float32Array {
       for (let s = 0; s < SAMPLES_PER_BIT; s++) {
         waveform[sampleIndex] = Math.sin(
           (2 * Math.PI * freq * sampleIndex) / SAMPLE_RATE
-        ) * 0.5; // amplitude 0.5 to avoid clipping
+        ) * 0.9; // high amplitude for speaker-to-mic transfer
         sampleIndex++;
       }
     }
@@ -173,7 +173,7 @@ export class AudioEncoder {
 
 const RING_BUFFER_SIZE = 65536; // ~1.5 seconds at 44100 Hz
 const PROCESS_INTERVAL_MS = 500;
-const NOISE_THRESHOLD = 0.02;
+const NOISE_THRESHOLD = 0.001;
 
 const enum DecoderState {
   WAIT_PREAMBLE,
@@ -249,7 +249,7 @@ export class AudioDecoder {
 
   private processAccumulated(): void {
     // Process up to a limited number of bits per interval to avoid blocking
-    const maxBits = 300; // ~300 bits = enough for a full frame
+    const maxBits = 200; // enough for a full frame at 100 baud
     let bitsProcessed = 0;
 
     while (this.availableSamples() >= SAMPLES_PER_BIT && bitsProcessed < maxBits) {
