@@ -447,15 +447,17 @@ export class AudioDecoder {
         break;
 
       case DecoderState.WAIT_SYNC:
+        // Sliding window: check if the last 8 bits form the sync word
+        // This handles any bit alignment from the preamble
         this.bitBuffer.push(bit);
-        if (this.bitBuffer.length === 8) {
-          const byte = this.bitsToValue(this.bitBuffer);
+        if (this.bitBuffer.length >= 8) {
+          const last8 = this.bitBuffer.slice(-8);
+          const byte = this.bitsToValue(last8);
           if (byte === SYNC_WORD) {
             this.state = DecoderState.READ_LENGTH;
             this.bitBuffer = [];
-          } else if (byte === PREAMBLE_BYTE) {
-            this.bitBuffer = [];
-          } else {
+          } else if (this.bitBuffer.length > 32) {
+            // Too many bits without finding sync — reset
             this.resetState();
           }
         }
