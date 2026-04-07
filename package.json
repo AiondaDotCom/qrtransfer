@@ -1,0 +1,26 @@
+{
+  "name": "qrtransfer",
+  "version": "1.0.0",
+  "description": "Offline file transfer via QR codes - single HTML file, no server required",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "pako": "^2.1.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/pako": "^2.0.3",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.5.0",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.0.3",
+    "vitest": "^2.1.0"
+  }
+}

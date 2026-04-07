@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QR Transfer - Offline File Transfer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="bg-glow"></div>
+
+      <div class="container">
+        <header>
+          <div class="logo">
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+              <rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="2.5" />
+              <rect x="5" y="5" width="8" height="8" rx="1" fill="currentColor" />
+              <rect x="24" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="2.5" />
+              <rect x="27" y="5" width="8" height="8" rx="1" fill="currentColor" />
+              <rect x="2" y="24" width="14" height="14" rx="2" stroke="currentColor" stroke-width="2.5" />
+              <rect x="5" y="27" width="8" height="8" rx="1" fill="currentColor" />
+              <rect x="24" y="24" width="4" height="4" fill="currentColor" />
+              <rect x="30" y="24" width="4" height="4" fill="currentColor" />
+              <rect x="36" y="24" width="4" height="4" fill="currentColor" />
+              <rect x="24" y="30" width="4" height="4" fill="currentColor" />
+              <rect x="36" y="30" width="4" height="4" fill="currentColor" />
+              <rect x="24" y="36" width="4" height="4" fill="currentColor" />
+              <rect x="30" y="36" width="4" height="4" fill="currentColor" />
+              <rect x="36" y="36" width="4" height="4" fill="currentColor" />
+            </svg>
+            <div>
+              <h1>QR Transfer</h1>
+              <p class="subtitle">Offline file transfer via QR codes</p>
+            </div>
+          </div>
+        </header>
+
+        <div class="tabs">
+          <button id="tab-send" class="tab active" data-tab="send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Send
+          </button>
+          <button id="tab-receive" class="tab" data-tab="receive">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Receive
+          </button>
+        </div>
+
+        <!-- ==================== SEND PANEL ==================== -->
+        <div id="send-panel" class="panel active">
+          <div id="drop-zone" class="drop-zone">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-icon">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <p class="drop-text">Drop a file here or <span class="link">click to select</span></p>
+            <p class="drop-hint">Recommended: files under 100 KB for fast transfer</p>
+            <input type="file" id="file-input" />
+          </div>
+
+          <div id="send-active" class="hidden">
+            <div class="file-badge" id="file-badge">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <span id="file-name"></span>
+              <span class="file-size" id="file-size"></span>
+              <span class="chunk-count" id="chunk-count"></span>
+            </div>
+
+            <div class="settings-row">
+              <div class="setting">
+                <label for="chunk-size">Chunk Size</label>
+                <div class="range-wrap">
+                  <input type="range" id="chunk-size" min="300" max="2000" step="100" value="900" />
+                  <span id="chunk-size-val">900 B</span>
+                </div>
+              </div>
+              <div class="setting">
+                <label for="speed">Speed</label>
+                <div class="range-wrap">
+                  <input type="range" id="speed" min="100" max="2000" step="50" value="600" />
+                  <span id="speed-val">600 ms</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="qr-area">
+              <canvas id="qr-canvas"></canvas>
+              <div class="qr-overlay" id="qr-overlay">
+                <p>Press Play to start</p>
+              </div>
+            </div>
+
+            <div class="progress-section">
+              <div class="progress-text">
+                Chunk <strong id="send-current">0</strong> / <strong id="send-total">0</strong>
+              </div>
+              <div class="progress-bar">
+                <div id="send-progress" class="progress-fill"></div>
+              </div>
+            </div>
+
+            <div class="controls">
+              <button id="btn-prev" class="btn btn-icon" title="Previous chunk">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+              </button>
+              <button id="btn-play" class="btn btn-primary">
+                <svg id="icon-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <svg id="icon-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="hidden"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                <span id="play-label">Play</span>
+              </button>
+              <button id="btn-next" class="btn btn-icon" title="Next chunk">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== RECEIVE PANEL ==================== -->
+        <div id="receive-panel" class="panel">
+          <div id="receive-idle">
+            <div class="receive-intro">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="camera-icon">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              <p>Point your camera at the sender's QR codes to receive a file.</p>
+            </div>
+            <button id="btn-start-scan" class="btn btn-primary btn-large">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              Start Camera
+            </button>
+          </div>
+
+          <div id="receive-active" class="hidden">
+            <div class="camera-wrapper">
+              <video id="camera" autoplay playsinline muted></video>
+              <canvas id="scan-canvas"></canvas>
+              <div id="scan-indicator" class="scan-indicator hidden">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <div class="scan-line"></div>
+            </div>
+
+            <div id="recv-info" class="recv-info hidden">
+              <div class="file-badge">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span id="recv-filename">-</span>
+                <span class="file-size" id="recv-filesize">-</span>
+              </div>
+
+              <div class="progress-section">
+                <div class="progress-text">
+                  <strong id="recv-current">0</strong> / <strong id="recv-total">0</strong> chunks
+                </div>
+                <div class="progress-bar">
+                  <div id="recv-progress" class="progress-fill"></div>
+                </div>
+              </div>
+
+              <div id="chunk-grid" class="chunk-grid"></div>
+            </div>
+
+            <div id="receive-complete" class="complete-section hidden">
+              <div class="success-ring">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+              </div>
+              <h2>Transfer Complete!</h2>
+              <p id="recv-summary"></p>
+              <p class="crc-badge" id="recv-crc"></p>
+              <button id="btn-download" class="btn btn-primary btn-large">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Download File
+              </button>
+            </div>
+
+            <div class="receive-controls">
+              <button id="btn-stop-scan" class="btn btn-secondary">Stop Camera</button>
+              <button id="btn-reset-scan" class="btn btn-ghost">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <footer>
+          <p>QR Transfer &mdash; No server, no cloud, no tracking. 100% offline.</p>
+        </footer>
+      </div>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
