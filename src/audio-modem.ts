@@ -174,11 +174,31 @@ export class AudioEncoder {
     await this.ctx.resume();
     const actualRate = this.ctx.sampleRate;
 
-    // Send bitfield for first 64 chunks (8 bytes) — no FEC, short frame
-    const maxChunks = 64;
-    const effectiveChunks = Math.min(totalChunks, maxChunks);
-    const bitfieldBytes = encodeBitfieldRaw(received, effectiveChunks);
-    const frame = buildFrame(bitfieldBytes);
+    // Sliding window: find first missing chunk, start window there
+    let windowStart = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      if (!received.has(i)) { windowStart = i; break; }
+    }
+    // If all received, window at the end
+    if (windowStart === 0 && received.has(0) && received.size === totalChunks) {
+      windowStart = totalChunks;
+    }
+
+    // Build bitfield for 64 chunks starting at windowStart
+    const windowSize = 64;
+    const windowSet = new Set<number>();
+    for (let i = 0; i < windowSize && (windowStart + i) < totalChunks; i++) {
+      if (received.has(windowStart + i)) windowSet.add(i);
+    }
+    const bitfieldBytes = encodeBitfieldRaw(windowSet, windowSize);
+
+    // Frame: [offset_hi][offset_lo][bitfield 8 bytes]
+    const payload = new Uint8Array(2 + bitfieldBytes.length);
+    payload[0] = (windowStart >> 8) & 0xff;
+    payload[1] = windowStart & 0xff;
+    payload.set(bitfieldBytes, 2);
+
+    const frame = buildFrame(payload);
 
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -402,8 +422,8 @@ export class AudioDecoder {
           this.dataLength = this.bitsToValue(this.bitBuffer);
           this.bitBuffer = [];
           this.bytesCollected = [];
-          // Expected length is 1-8 bytes (bitfield for up to 64 chunks)
-          if (this.dataLength < 1 || this.dataLength > 8) {
+          // Expected length is 10 (2 offset + 8 bitfield)
+          if (this.dataLength !== 10) {
             this.resetState();
           } else {
             this.state = DecoderState.READ_DATA;
@@ -433,23 +453,31 @@ export class AudioDecoder {
   }
 
   private validateFrame(): void {
-    // Data = bitfield bytes, last byte = CRC
-    const bitfield = new Uint8Array(this.bytesCollected.slice(0, this.dataLength));
+    // Data = [offset_hi][offset_lo][bitfield 8 bytes], last collected byte = CRC
+    const payload = new Uint8Array(this.bytesCollected.slice(0, this.dataLength));
     const receivedCrc = this.bytesCollected[this.dataLength];
 
-    // CRC over [length, bitfield...]
+    // CRC over [length, payload...]
     const crcInput = new Uint8Array(1 + this.dataLength);
     crcInput[0] = this.dataLength;
-    crcInput.set(bitfield, 1);
+    crcInput.set(payload, 1);
 
     if (crc8(crcInput) !== receivedCrc) { this.crcFails++; return; }
 
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
 
-    const totalChunks = this.dataLength * 8;
-    const received = decodeBitfieldRaw(bitfield, totalChunks);
-    this.onFeedback(received, totalChunks);
+    // Parse offset + bitfield
+    const windowStart = (payload[0] << 8) | payload[1];
+    const bitfield = payload.slice(2);
+    const windowReceived = decodeBitfieldRaw(bitfield, 64);
+
+    // Map window-relative positions to absolute chunk positions
+    const received = new Set<number>();
+    for (const relIdx of windowReceived) {
+      received.add(windowStart + relIdx);
+    }
+    this.onFeedback(received, windowStart + 64);
   }
 
   stop(): void {
