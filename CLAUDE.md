@@ -24,7 +24,7 @@ Deploy workflow:
 1. `npm run build`
 2. `git checkout gh-pages && yes | cp dist/index.html index.html && git add index.html && git commit -m "message" && git push origin gh-pages && git checkout main`
 
-The `gh-pages` branch has a `CNAME` file pointing to `qr.aionda.com` (Cloudflare proxy enabled). **IMPORTANT:** Cloudflare and phone browsers aggressively cache the JS. Always bump the version in both `package.json` and `src/index.html` footer when deploying. The user checks the version number in the footer to confirm they have the latest code.
+**IMPORTANT:** Cloudflare and phone browsers aggressively cache JS. Always bump the version in both `package.json` AND `src/index.html` footer. The user checks the footer version to confirm they have the latest code. The phone may show the new version number but still run old JS — frequency analysis of WAV recordings proved this.
 
 ## Architecture
 
@@ -32,54 +32,94 @@ The `gh-pages` branch has a `CNAME` file pointing to `qr.aionda.com` (Cloudflare
 
 **Data flow (receive):** Camera → `Receiver.scanLoop()` (requestAnimationFrame + `jsqr`) → `protocol.parsePacket()` → accumulate in Map → `protocol.assembleChunks()` (concat + decompress + CRC32 verify) → download or display text.
 
-**Audio feedback flow:** Receiver → `AudioEncoder` plays FSK tones via speaker → Sender's `AudioDecoder` listens via mic → decodes bitfield → `Sender.handleAudioFeedback()` updates playlist to skip confirmed chunks.
+**Audio feedback flow:** Receiver → `AudioEncoder` plays FSK tones via speaker → Sender's `AudioDecoder` listens via mic → decodes range → `Sender.handleAudioFeedback()` updates playlist to skip confirmed chunks.
+
+**Calibration flow:** Sender shows QR `{"cal":"low"}` → Receiver plays tone → Sender measures peak frequency → repeat for high tone → `{"cal":"done"}` → modem starts with calibrated frequencies.
 
 **Key files:**
 - `src/protocol.ts` — chunking, compression (pako), CRC32, serialization
-- `src/sender.ts` — `Sender` class with optional audio feedback (adaptive playlist)
-- `src/receiver.ts` — `Receiver` class with optional audio feedback (tone playback)
-- `src/audio-modem.ts` — FSK modem: AudioEncoder, AudioDecoder, CRC-8, Goertzel algorithm
-- `src/feedback.ts` — bitfield encoding/decoding for audio feedback
+- `src/sender.ts` — `Sender` class with audio feedback (adaptive playlist) + calibration
+- `src/receiver.ts` — `Receiver` class with audio feedback (tone playback) + calibration tone player
+- `src/audio-modem.ts` — FSK modem: AudioEncoder, AudioDecoder, CRC-8, Goertzel, CalibrationMic, CalibrationTonePlayer
+- `src/feedback.ts` — bitfield encoding/decoding (used by some tests, not by current modem)
 - `src/main.ts` — DOM wiring, tabs, settings, chunk grid visualization
 - `src/index.html` — HTML structure
 - `src/styles.css` — dark theme UI
 
 ## Audio Modem ("Bell 202 Pro")
 
-The audio feedback uses FSK (Frequency Shift Keying) to send chunk position data from receiver to sender through air (phone speaker → laptop mic).
+The audio feedback uses FSK (Frequency Shift Keying) to send chunk range data from receiver to sender through air (phone speaker → laptop mic).
 
-**Parameters (hard-won through extensive testing):**
-- Frequencies: **1500 Hz** (bit 0) / **4500 Hz** (bit 1) — 3000 Hz apart, non-harmonic
+**Current parameters (v4.1.0):**
+- Frequencies: **2000 Hz** (bit 0) / **3500 Hz** (bit 1) — ratio 1.75, non-harmonic, 1500 Hz apart
 - Baud rate: **10 baud** (100ms per bit, 4800 samples at 48kHz for Goertzel)
-- Preamble: **4 bytes** (32 alternating bits for reliable sync lock)
-- Sync word: **0xD5** (detected via sliding window for bit-alignment tolerance)
-- No length byte (payload is always 6 bytes — eliminates a corruption point)
+- Preamble: **4 bytes** (32 alternating bits)
+- Sync word: **0xD5** (detected via sliding window)
+- Payload: **2 bytes** (start/4 + length = contiguous received range)
 - CRC-8 on payload
+- No length byte in frame
 
 **Frame format:**
 ```
-[0xAA×4][0xD5][offsetHi][offsetLo][bitfield 4B][CRC-8]
-= 12 bytes = 96 bits = 9.6 seconds per frame
+[0xAA×4][0xD5][start][length][CRC-8] = 8 bytes = 64 bits = 6.4 seconds
 ```
 
-**Sliding window:** The bitfield covers 32 chunks starting at the first missing chunk. As chunks get confirmed, the window slides forward to cover the entire file.
+- `start`: chunk range start divided by 4 (1 byte, covers chunks 0-1020)
+- `length`: number of contiguous chunks (1 byte, max 255)
+- Sender skips the confirmed range and shows only missing chunks
 
-**Key lessons learned during development:**
+**Calibration:**
+Before modem starts, sender shows QR codes asking receiver to play calibration tones:
+1. `{"cal":"low"}` → receiver plays 2000 Hz in 3-beep pattern (beep-pause-beep-pause-beep)
+2. Sender detects 2+ beep transitions, measures peak frequency (±300 Hz sweep, then ±50 Hz fine)
+3. `{"cal":"high"}` → same for 3500 Hz
+4. `{"cal":"done"}` → receiver starts modem, sender uses measured frequencies for decoder
+
+**Frequency selection — critical lessons:**
+- 1200/2400 Hz (Bell 202): harmonically related (2:1) — 2400 is overtone of 1200, cross-contamination
+- 1500/4500 Hz: also harmonically related (3:1) — 4500 is 3rd harmonic of 1500, ratio 1.2:1 through speaker
+- 600/1050 Hz: too low for laptop speakers, failed
+- 1000/1750 Hz: pleasant sound but poor discrimination through laptop speaker→mic
+- **2000/3500 Hz: WORKS** — ratio 1.75 (non-integer), both in speaker sweet spot, verified CRC OK through air
+
+**What works (verified through actual speaker→mic air transmission):**
+- Empty payload `[0x00,0x00]` → CRC OK ✓
+- High water mark `highWater=42` → CRC OK ✓
+- Range `start=10,len=38` (chunks 40-77) → CRC OK ✓
+- Calibration: measured 998-1004 Hz and 1745-1792 Hz from phone ✓
+
+**What doesn't work reliably yet:**
+- Longer payloads (6+ bytes) degrade due to room echo accumulating over frame duration
+- iPhone→laptop has lower success rate than laptop→laptop (different speaker characteristics)
+- ggwave WASM library failed through speaker→mic despite multiple fix attempts
+
+**Key lessons learned:**
 1. Browser audio processing (echoCancellation, autoGainControl, noiseSuppression) DESTROYS FSK signals — must disable in getUserMedia constraints
-2. AudioContext sample rate varies by device (44100, 48000, etc.) — use `ctx.sampleRate` dynamically, never hardcode
-3. Looping audio with `source.loop=true` needs silence gap between frames, otherwise decoder can't reset
-4. ScriptProcessorNode must NOT do heavy processing in callbacks — use ring buffer + setInterval
-5. The length byte in the frame was the #1 corruption point — removed it, use fixed 6-byte payload
-6. 1200/2400 Hz (original Bell 202) are harmonically related — 2400 is an overtone of 1200, making discrimination hard. 1500/4500 Hz (non-harmonic, 3000 Hz apart) is much better
-7. Slower baud = more reliable. 50 baud had ~30% CRC success, 10 baud should be much better
-8. Phone browser JS caching is aggressive — version must be bumped and user must verify footer version
-9. ggwave (WASM library) was tried but failed: requires 4096+ sample chunks, looping caused marker collision, and the complexity wasn't worth it for our simple feedback use case
-10. WAV file analysis with Node.js is the best debugging tool — record with `rec /tmp/feedback.wav trim 0 30`, then decode offline
+2. AudioContext sample rate varies by device (44100, 48000) — use `ctx.sampleRate` dynamically
+3. Looping audio needs 500ms+ silence gap between frames for decoder to reset
+4. ScriptProcessorNode must NOT do heavy processing in callbacks — use ring buffer + setInterval(500ms)
+5. Length byte in frame was #1 corruption point — removed, use fixed payload size
+6. Non-harmonic frequency pairs are ESSENTIAL — any integer ratio causes cross-contamination
+7. Shorter frames = more reliable. 2 bytes payload works, 6 bytes doesn't
+8. Phone browser caching is extremely aggressive — WAV frequency analysis proved phone was sending old frequencies despite showing new version
+9. ggwave needs 4096+ sample chunks, silence in loops, Int8 format — but still failed through air
+10. Self-testing with `play` + `rec` (sox) is the fastest way to verify changes — no phone needed
+11. Calibration works: QR-based tone request → 3-beep pattern detection → frequency measurement
+12. 10 baud (100ms/bit) with 4800 samples gives Goertzel enough data for reliable frequency detection
 
-**Testing audio changes:**
-1. Generate test WAV: create waveform programmatically in Node.js, save as 32-bit PCM WAV at 48000 Hz
-2. Decode test WAV: run the exact decoder state machine in Node.js on the WAV data
-3. Live test: deploy, load on both devices (check version!), open browser console for `[MODEM]` logs
+**Testing audio changes (self-test without phone):**
+```bash
+# 1. Generate WAV with modem signal
+node /tmp/gen_test.js  # creates /tmp/test.wav
+
+# 2. Play through speaker and record from mic simultaneously
+play /tmp/test.wav & rec /tmp/recorded.wav trim 0 15; kill %1
+
+# 3. Decode the recording
+node /tmp/decode_test.js  # reads /tmp/recorded.wav
+```
+
+This tests the full speaker→air→mic path on the laptop itself. If it decodes here, it should work with phones too (though phone speakers have different characteristics).
 
 ## QR Protocol
 
@@ -87,6 +127,8 @@ The audio feedback uses FSK (Frequency Shift Keying) to send chunk position data
 - Chunk 0 metadata: filename (`n`), file size (`s`), CRC32 hash (`h`), type (`tp`: "t" for text)
 - All chunks: version (`v`=1), index (`i`), total (`t`), base64 data (`d`)
 - Chunks scanned in any order; receiver assembles by index
+
+**Calibration QR codes:** `{"cal":"low"}`, `{"cal":"high"}`, `{"cal":"done"}` — detected by receiver's `handleQRData` before checking for data packets.
 
 **Default settings:** chunk size 300B, speed 100ms
 
@@ -98,6 +140,13 @@ The audio feedback uses FSK (Frequency Shift Keying) to send chunk position data
 - `tests/audio-modem.test.ts` — CRC-8, frame building/parsing, Goertzel, FSK loopback
 
 Note: test data must not compress too well or you get single-chunk results. Use pseudo-random patterns like `(i * 137 + 83) % 256`.
+
+## Known Issues / TODO
+
+1. Decoder starts twice (two ScriptProcessorNodes created) — need to prevent double `startListening()` call
+2. Calibration 3-beep detection sometimes triggers on room noise (threshold=15 may need tuning)
+3. Phone→laptop audio decoding is less reliable than laptop→laptop (different speaker frequency response)
+4. Transfer should use batch sending (chunks 0-31 repeatedly, then 32-63, etc.) when audio feedback is enabled — this ensures sequential reception which maximizes audio feedback utility
 
 ## Legal
 
