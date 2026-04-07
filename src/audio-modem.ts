@@ -200,9 +200,10 @@ export class AudioEncoder {
   private source: AudioBufferSourceNode | null = null;
   private _isPlaying = false;
 
-  start(received: Set<number>, totalChunks: number): void {
+  async start(received: Set<number>, totalChunks: number): Promise<void> {
     this.stop();
     this.ctx = new AudioContext();
+    await this.ctx.resume(); // ensure not suspended
     const actualRate = this.ctx.sampleRate;
 
     const bitfieldBytes = encodeBitfieldRaw(received, totalChunks);
@@ -270,6 +271,8 @@ export class AudioDecoder {
   private processIntervalId: number | null = null;
   private _isListening = false;
   private onFeedback: (received: Set<number>, totalChunks: number) => void;
+  private onMicLevel: ((level: number) => void) | null = null;
+  private peakLevel = 0;
 
   // Ring buffer for samples — no allocations during audio callback
   private ringBuffer = new Float32Array(RING_BUFFER_SIZE);
@@ -288,14 +291,17 @@ export class AudioDecoder {
   private startTime = 0;
 
   constructor(
-    onFeedback: (received: Set<number>, totalChunks: number) => void
+    onFeedback: (received: Set<number>, totalChunks: number) => void,
+    onMicLevel?: (level: number) => void
   ) {
     this.onFeedback = onFeedback;
+    this.onMicLevel = onMicLevel ?? null;
   }
 
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.ctx = new AudioContext();
+    await this.ctx.resume(); // ensure not suspended
     this.actualSampleRate = this.ctx.sampleRate;
     this.actualSamplesPerBit = Math.round(this.actualSampleRate / BAUD_RATE);
     this.startTime = Date.now();
@@ -303,13 +309,17 @@ export class AudioDecoder {
     const source = this.ctx.createMediaStreamSource(this.stream);
     this.processor = this.ctx.createScriptProcessor(4096, 1, 1);
 
-    // Audio callback: just copy samples to ring buffer (no processing, no allocation)
+    // Audio callback: copy samples to ring buffer + track peak level
     this.processor.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
+      let peak = 0;
       for (let i = 0; i < input.length; i++) {
         this.ringBuffer[this.writePos] = input[i];
         this.writePos = (this.writePos + 1) & (RING_BUFFER_SIZE - 1);
+        const abs = Math.abs(input[i]);
+        if (abs > peak) peak = abs;
       }
+      this.peakLevel = peak;
     };
 
     source.connect(this.processor);
@@ -335,8 +345,13 @@ export class AudioDecoder {
   }
 
   private processAccumulated(): void {
+    // Report mic level for UI feedback
+    if (this.onMicLevel) {
+      this.onMicLevel(this.peakLevel);
+    }
+
     // Process up to a limited number of bits per interval to avoid blocking
-    const maxBits = 200; // enough for a full frame at 100 baud
+    const maxBits = 200;
     let bitsProcessed = 0;
 
     while (this.availableSamples() >= this.actualSamplesPerBit && bitsProcessed < maxBits) {

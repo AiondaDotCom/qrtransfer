@@ -235,6 +235,14 @@ async function handleFile(file: File) {
       audioIndicatorDetail.textContent = '';
       audioIndicator.classList.add('received');
     },
+    onMicLevel: (level) => {
+      // Show mic activity level — helps debug audio feedback issues
+      if (!audioIndicator.classList.contains('hidden')) {
+        const pct = Math.min(100, Math.round(level * 1000));
+        const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));
+        audioIndicatorDetail.textContent = `Mic: ${bar} ${pct}%`;
+      }
+    },
   });
 
   const chunkSize = parseInt(chunkSizeSlider.value);

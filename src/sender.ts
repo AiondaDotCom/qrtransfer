@@ -7,6 +7,7 @@ export interface SenderCallbacks {
   onReady: (totalChunks: number) => void;
   onFeedbackReceived?: (received: number, total: number) => void;
   onTransferComplete?: () => void;
+  onMicLevel?: (level: number) => void;
 }
 
 export class Sender {
@@ -131,9 +132,10 @@ export class Sender {
 
   // ===== Audio Feedback =====
   async startListening(): Promise<void> {
-    this.decoder = new AudioDecoder((received) => {
-      this.handleAudioFeedback(received);
-    });
+    this.decoder = new AudioDecoder(
+      (received) => { this.handleAudioFeedback(received); },
+      this.callbacks.onMicLevel
+    );
     await this.decoder.start();
   }
 
