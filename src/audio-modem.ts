@@ -174,20 +174,11 @@ export class AudioEncoder {
     await this.ctx.resume();
     const actualRate = this.ctx.sampleRate;
 
-    // Send received count + total as 4 bytes + CRC, with 3x FEC
-    const recvCount = received.size;
-    const inner = new Uint8Array(5);
-    inner[0] = (recvCount >> 8) & 0xff;
-    inner[1] = recvCount & 0xff;
-    inner[2] = (totalChunks >> 8) & 0xff;
-    inner[3] = totalChunks & 0xff;
-    inner[4] = crc8(inner.subarray(0, 4));
-
-    const fecData = fecEncode(inner);
-    const frame = new Uint8Array(2 + 1 + 1 + fecData.length);
-    frame[0] = PREAMBLE_BYTE; frame[1] = PREAMBLE_BYTE;
-    frame[2] = SYNC_WORD; frame[3] = fecData.length;
-    frame.set(fecData, 4);
+    // Send bitfield for first 64 chunks (8 bytes) — no FEC, short frame
+    const maxChunks = 64;
+    const effectiveChunks = Math.min(totalChunks, maxChunks);
+    const bitfieldBytes = encodeBitfieldRaw(received, effectiveChunks);
+    const frame = buildFrame(bitfieldBytes);
 
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -313,7 +304,7 @@ export class AudioDecoder {
       if (this.onMicLevel) this.onMicLevel(this.peakLevel);
       if (this.onDebug) {
         const stateNames = ['PREAMBLE', 'SYNC', 'LENGTH', 'DATA'];
-        const extra = this.state === 3 ? ` len:${this.dataLength} got:${this.bytesCollected.length}/${this.dataLength}` : '';
+        const extra = this.state === 3 ? ` len:${this.dataLength} got:${this.bytesCollected.length}/${this.dataLength + 1}` : '';
         this.onDebug(
           `Bell202 ${stateNames[this.state]} | bits:${this.bitsDecoded} pre:${this.preambleFound} crc:${this.crcOk}ok/${this.crcFails}fail${extra}`
         );
@@ -411,8 +402,8 @@ export class AudioDecoder {
           this.dataLength = this.bitsToValue(this.bitBuffer);
           this.bitBuffer = [];
           this.bytesCollected = [];
-          // Expected length is always 15 (5 inner bytes × 3 FEC)
-          if (this.dataLength !== 15) {
+          // Expected length is 1-8 bytes (bitfield for up to 64 chunks)
+          if (this.dataLength < 1 || this.dataLength > 8) {
             this.resetState();
           } else {
             this.state = DecoderState.READ_DATA;
@@ -425,7 +416,8 @@ export class AudioDecoder {
         if (this.bitBuffer.length === 8) {
           this.bytesCollected.push(this.bitsToValue(this.bitBuffer));
           this.bitBuffer = [];
-          if (this.bytesCollected.length === this.dataLength) {
+          // Read dataLength bytes of data + 1 byte CRC
+          if (this.bytesCollected.length === this.dataLength + 1) {
             this.validateFrame();
             this.resetState();
           }
@@ -441,25 +433,22 @@ export class AudioDecoder {
   }
 
   private validateFrame(): void {
-    const fecData = new Uint8Array(this.bytesCollected);
+    // Data = bitfield bytes, last byte = CRC
+    const bitfield = new Uint8Array(this.bytesCollected.slice(0, this.dataLength));
+    const receivedCrc = this.bytesCollected[this.dataLength];
 
-    // FEC decode: 3x repetition, inner = 5 bytes (4 data + 1 CRC) = 40 bits
-    const originalBitCount = Math.floor(this.dataLength * 8 / 3);
-    const inner = fecDecode(fecData, originalBitCount);
+    // CRC over [length, bitfield...]
+    const crcInput = new Uint8Array(1 + this.dataLength);
+    crcInput[0] = this.dataLength;
+    crcInput.set(bitfield, 1);
 
-    if (inner.length < 5) { this.crcFails++; return; }
-
-    const expectedCrc = crc8(inner.subarray(0, 4));
-    if (expectedCrc !== inner[4]) { this.crcFails++; return; }
+    if (crc8(crcInput) !== receivedCrc) { this.crcFails++; return; }
 
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
 
-    const recvCount = (inner[0] << 8) | inner[1];
-    const totalChunks = (inner[2] << 8) | inner[3];
-
-    const received = new Set<number>();
-    for (let i = 0; i < recvCount; i++) received.add(i);
+    const totalChunks = this.dataLength * 8;
+    const received = decodeBitfieldRaw(bitfield, totalChunks);
     this.onFeedback(received, totalChunks);
   }
 

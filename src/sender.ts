@@ -150,13 +150,18 @@ export class Sender {
 
   private handleAudioFeedback(received: Set<number>): void {
     const total = this.packets.length;
-    const recvCount = received.size;
 
     if (this.callbacks.onFeedbackReceived) {
-      this.callbacks.onFeedbackReceived(recvCount, total, received);
+      this.callbacks.onFeedbackReceived(received.size, total, received);
     }
 
-    if (recvCount >= total) {
+    // Build playlist: skip received chunks, only send missing ones
+    const missing: number[] = [];
+    for (let i = 0; i < total; i++) {
+      if (!received.has(i)) missing.push(i);
+    }
+
+    if (missing.length === 0) {
       this.completed = true;
       this.pause();
       this.stopListening();
@@ -166,8 +171,9 @@ export class Sender {
       return;
     }
 
-    // With count-based feedback we can't optimize individual chunks,
-    // but we continue sending all — the receiver fills in the gaps
+    // Update playlist to only show missing chunks
+    this.playlist = missing;
+    this.playlistIndex = this.playlistIndex % this.playlist.length;
   }
 
   get isPlaying(): boolean {
