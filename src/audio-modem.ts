@@ -63,8 +63,8 @@ export function parseFrame(frameBytes: Uint8Array): Uint8Array | null {
   return data;
 }
 
-// Generate FSK waveform from frame bytes
-function generateWaveform(frame: Uint8Array): Float32Array {
+// Generate FSK waveform from frame bytes (exported for testing)
+export function generateWaveform(frame: Uint8Array): Float32Array {
   const totalBits = frame.length * 8;
   const totalSamples = totalBits * SAMPLES_PER_BIT + GAP_SAMPLES;
   const waveform = new Float32Array(totalSamples);
@@ -86,6 +86,61 @@ function generateWaveform(frame: Uint8Array): Float32Array {
   // Gap samples remain 0 (silence)
 
   return waveform;
+}
+
+// Pure decoder function for testing — no Web Audio dependency
+// Takes a waveform and tries to decode a feedback frame from it
+export function decodeWaveform(
+  waveform: Float32Array
+): { received: Set<number>; totalChunks: number } | null {
+  const bits: number[] = [];
+  let offset = 0;
+
+  // Decode all bits from the waveform
+  while (offset + SAMPLES_PER_BIT <= waveform.length) {
+    const mag0 = goertzelMagnitude(waveform, offset, SAMPLES_PER_BIT, FREQ_ZERO, SAMPLE_RATE);
+    const mag1 = goertzelMagnitude(waveform, offset, SAMPLES_PER_BIT, FREQ_ONE, SAMPLE_RATE);
+    offset += SAMPLES_PER_BIT;
+
+    const maxMag = Math.max(mag0, mag1);
+    if (maxMag < 0.001) {
+      // Silence — if we have accumulated bits, try to parse
+      if (bits.length > 0) break;
+      continue;
+    }
+
+    bits.push(mag1 > mag0 ? 1 : 0);
+  }
+
+  if (bits.length < 32) return null; // too few bits for any frame
+
+  // Convert bits to bytes
+  const bytes: number[] = [];
+  for (let i = 0; i + 7 < bits.length; i += 8) {
+    let val = 0;
+    for (let j = 0; j < 8; j++) {
+      val = (val << 1) | bits[i + j];
+    }
+    bytes.push(val);
+  }
+
+  // Find preamble + sync in byte stream
+  for (let i = 0; i < bytes.length - 4; i++) {
+    if (bytes[i] === PREAMBLE_BYTE && bytes[i + 1] === PREAMBLE_BYTE && bytes[i + 2] === SYNC_WORD) {
+      const dataLen = bytes[i + 3];
+      if (i + 4 + dataLen + 1 > bytes.length) return null; // not enough data
+
+      const frameBytes = new Uint8Array(bytes.slice(i, i + 4 + dataLen + 1));
+      const bitfieldBytes = parseFrame(frameBytes);
+      if (!bitfieldBytes) return null;
+
+      const totalChunks = dataLen * 8;
+      const received = decodeBitfieldRaw(bitfieldBytes, totalChunks);
+      return { received, totalChunks };
+    }
+  }
+
+  return null;
 }
 
 // Goertzel algorithm: compute magnitude of a specific frequency in a sample buffer
@@ -114,6 +169,31 @@ export function goertzelMagnitude(
   return Math.sqrt(s1 * s1 + s2 * s2 - coeff * s1 * s2);
 }
 
+// Generate waveform using a specific sample rate (for real audio output)
+function generateWaveformAtRate(frame: Uint8Array, sampleRate: number): Float32Array {
+  const samplesPerBit = Math.round(sampleRate / BAUD_RATE);
+  const gapSamples = Math.round((INTER_FRAME_GAP_MS / 1000) * sampleRate);
+  const totalBits = frame.length * 8;
+  const totalSamples = totalBits * samplesPerBit + gapSamples;
+  const waveform = new Float32Array(totalSamples);
+
+  let sampleIndex = 0;
+  for (let byteIdx = 0; byteIdx < frame.length; byteIdx++) {
+    const byte = frame[byteIdx];
+    for (let bitIdx = 7; bitIdx >= 0; bitIdx--) {
+      const bit = (byte >> bitIdx) & 1;
+      const freq = bit ? FREQ_ONE : FREQ_ZERO;
+      for (let s = 0; s < samplesPerBit; s++) {
+        waveform[sampleIndex] = Math.sin(
+          (2 * Math.PI * freq * sampleIndex) / sampleRate
+        ) * 0.9;
+        sampleIndex++;
+      }
+    }
+  }
+  return waveform;
+}
+
 // ===== AudioEncoder: plays FSK audio (used by receiver) =====
 export class AudioEncoder {
   private ctx: AudioContext | null = null;
@@ -122,13 +202,14 @@ export class AudioEncoder {
 
   start(received: Set<number>, totalChunks: number): void {
     this.stop();
-    this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    this.ctx = new AudioContext();
+    const actualRate = this.ctx.sampleRate;
 
     const bitfieldBytes = encodeBitfieldRaw(received, totalChunks);
     const frame = buildFrame(bitfieldBytes);
-    const waveform = generateWaveform(frame);
+    const waveform = generateWaveformAtRate(frame, actualRate);
 
-    const buffer = this.ctx.createBuffer(1, waveform.length, SAMPLE_RATE);
+    const buffer = this.ctx.createBuffer(1, waveform.length, actualRate);
     buffer.getChannelData(0).set(waveform);
 
     this.source = this.ctx.createBufferSource();
@@ -195,6 +276,10 @@ export class AudioDecoder {
   private writePos = 0;
   private readPos = 0;
 
+  // Actual audio parameters (set after AudioContext creation)
+  private actualSampleRate = SAMPLE_RATE;
+  private actualSamplesPerBit = SAMPLES_PER_BIT;
+
   // Decoder state
   private state: DecoderState = DecoderState.WAIT_PREAMBLE;
   private bitBuffer: number[] = [];
@@ -210,7 +295,9 @@ export class AudioDecoder {
 
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    this.ctx = new AudioContext();
+    this.actualSampleRate = this.ctx.sampleRate;
+    this.actualSamplesPerBit = Math.round(this.actualSampleRate / BAUD_RATE);
     this.startTime = Date.now();
 
     const source = this.ctx.createMediaStreamSource(this.stream);
@@ -252,7 +339,7 @@ export class AudioDecoder {
     const maxBits = 200; // enough for a full frame at 100 baud
     let bitsProcessed = 0;
 
-    while (this.availableSamples() >= SAMPLES_PER_BIT && bitsProcessed < maxBits) {
+    while (this.availableSamples() >= this.actualSamplesPerBit && bitsProcessed < maxBits) {
       const bit = this.decodeBitFromRing();
       bitsProcessed++;
 
@@ -265,8 +352,8 @@ export class AudioDecoder {
     }
 
     // If we're falling behind, skip ahead to stay near real-time
-    if (this.availableSamples() > SAMPLE_RATE) {
-      this.readPos = (this.writePos - SAMPLES_PER_BIT * 10 + RING_BUFFER_SIZE) & (RING_BUFFER_SIZE - 1);
+    if (this.availableSamples() > this.actualSampleRate) {
+      this.readPos = (this.writePos - this.actualSamplesPerBit * 10 + RING_BUFFER_SIZE) & (RING_BUFFER_SIZE - 1);
       this.resetState();
     }
   }
@@ -276,7 +363,7 @@ export class AudioDecoder {
     const mag1 = this.goertzelFromRing(FREQ_ONE);
 
     // Advance read position
-    this.readPos = (this.readPos + SAMPLES_PER_BIT) & (RING_BUFFER_SIZE - 1);
+    this.readPos = (this.readPos + this.actualSamplesPerBit) & (RING_BUFFER_SIZE - 1);
 
     const maxMag = Math.max(mag0, mag1);
     if (maxMag < NOISE_THRESHOLD) return -1;
@@ -285,15 +372,16 @@ export class AudioDecoder {
   }
 
   private goertzelFromRing(targetFreq: number): number {
-    const k = Math.round((SAMPLES_PER_BIT * targetFreq) / SAMPLE_RATE);
-    const w = (2 * Math.PI * k) / SAMPLES_PER_BIT;
+    const N = this.actualSamplesPerBit;
+    const k = Math.round((N * targetFreq) / this.actualSampleRate);
+    const w = (2 * Math.PI * k) / N;
     const coeff = 2 * Math.cos(w);
 
     let s0 = 0;
     let s1 = 0;
     let s2 = 0;
 
-    for (let i = 0; i < SAMPLES_PER_BIT; i++) {
+    for (let i = 0; i < N; i++) {
       const idx = (this.readPos + i) & (RING_BUFFER_SIZE - 1);
       s0 = this.ringBuffer[idx] + coeff * s1 - s2;
       s2 = s1;

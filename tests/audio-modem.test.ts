@@ -10,6 +10,8 @@ import {
   FREQ_ONE,
   SAMPLE_RATE,
   SAMPLES_PER_BIT,
+  generateWaveform,
+  decodeWaveform,
 } from '../src/audio-modem';
 import { encodeBitfieldRaw, decodeBitfieldRaw } from '../src/feedback';
 
@@ -188,6 +190,98 @@ describe('integration: frame through bitfield', () => {
     const frame = buildFrame(bitfield);
     // 2000 chunks = 250 bytes bitfield + 5 overhead = 255 bytes
     expect(frame.length).toBe(255);
-    // At 300 baud: 255*8/300 = 6.8 seconds. Acceptable.
+  });
+});
+
+describe('loopback: encode → waveform → decode', () => {
+  it('decodes a single-byte bitfield from waveform', () => {
+    const received = new Set([0, 2, 4, 6]);
+    const bitfieldBytes = encodeBitfieldRaw(received, 8);
+    const frame = buildFrame(bitfieldBytes);
+    const waveform = generateWaveform(frame);
+
+    const result = decodeWaveform(waveform);
+    expect(result).not.toBeNull();
+    expect(result!.totalChunks).toBe(8);
+    for (const idx of received) {
+      expect(result!.received.has(idx)).toBe(true);
+    }
+    expect(result!.received.size).toBe(received.size);
+  });
+
+  it('decodes a multi-byte bitfield (100 chunks)', () => {
+    const received = new Set<number>();
+    for (let i = 0; i < 50; i++) received.add(i); // first half received
+    const bitfieldBytes = encodeBitfieldRaw(received, 104); // 13 bytes
+    const frame = buildFrame(bitfieldBytes);
+    const waveform = generateWaveform(frame);
+
+    const result = decodeWaveform(waveform);
+    expect(result).not.toBeNull();
+    expect(result!.totalChunks).toBe(104);
+    expect(result!.received.size).toBe(50);
+    for (let i = 0; i < 50; i++) {
+      expect(result!.received.has(i)).toBe(true);
+    }
+    for (let i = 50; i < 104; i++) {
+      expect(result!.received.has(i)).toBe(false);
+    }
+  });
+
+  it('decodes empty bitfield (no chunks received)', () => {
+    const bitfieldBytes = encodeBitfieldRaw(new Set(), 16);
+    const frame = buildFrame(bitfieldBytes);
+    const waveform = generateWaveform(frame);
+
+    const result = decodeWaveform(waveform);
+    expect(result).not.toBeNull();
+    expect(result!.received.size).toBe(0);
+  });
+
+  it('decodes full bitfield (all chunks received)', () => {
+    const received = new Set<number>();
+    for (let i = 0; i < 24; i++) received.add(i);
+    const bitfieldBytes = encodeBitfieldRaw(received, 24);
+    const frame = buildFrame(bitfieldBytes);
+    const waveform = generateWaveform(frame);
+
+    const result = decodeWaveform(waveform);
+    expect(result).not.toBeNull();
+    expect(result!.received.size).toBe(24);
+  });
+
+  it('individual bits decode correctly from waveform', () => {
+    // Test that each bit period has the correct dominant frequency
+    const frame = new Uint8Array([0xAA, 0xAA, 0xD5, 0x01, 0xFF, 0x00]); // dummy frame
+    const waveform = generateWaveform(frame);
+
+    // First byte 0xAA = 10101010 — alternating frequencies
+    for (let bitIdx = 0; bitIdx < 8; bitIdx++) {
+      const expectedBit = (0xAA >> (7 - bitIdx)) & 1;
+      const offset = bitIdx * SAMPLES_PER_BIT;
+      const mag0 = goertzelMagnitude(waveform, offset, SAMPLES_PER_BIT, FREQ_ZERO, SAMPLE_RATE);
+      const mag1 = goertzelMagnitude(waveform, offset, SAMPLES_PER_BIT, FREQ_ONE, SAMPLE_RATE);
+
+      if (expectedBit === 1) {
+        expect(mag1).toBeGreaterThan(mag0);
+      } else {
+        expect(mag0).toBeGreaterThan(mag1);
+      }
+    }
+  });
+
+  it('returns null for silence', () => {
+    const silence = new Float32Array(SAMPLES_PER_BIT * 100); // all zeros
+    const result = decodeWaveform(silence);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for random noise', () => {
+    const noise = new Float32Array(SAMPLES_PER_BIT * 100);
+    for (let i = 0; i < noise.length; i++) {
+      noise[i] = (Math.random() - 0.5) * 0.001; // very low amplitude noise
+    }
+    const result = decodeWaveform(noise);
+    expect(result).toBeNull();
   });
 });
