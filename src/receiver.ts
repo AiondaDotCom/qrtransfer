@@ -1,6 +1,6 @@
 import jsQR from 'jsqr';
 import { parsePacket, assembleChunks, ChunkPacket, TransferMetadata } from './protocol';
-import { AudioEncoder } from './audio-modem';
+import { AudioEncoder, CalibrationTonePlayer, FREQ_ZERO, FREQ_ONE } from './audio-modem';
 
 export interface ReceiverCallbacks {
   onChunkReceived: (index: number, total: number, received: number) => void;
@@ -77,7 +77,18 @@ export class Receiver {
     this.animFrameId = requestAnimationFrame(() => this.scanLoop());
   }
 
+  private calPlayer: CalibrationTonePlayer | null = null;
+
   private handleQRData(raw: string): void {
+    // Check for calibration commands first
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && obj.cal) {
+        this.handleCalibration(obj.cal);
+        return;
+      }
+    } catch { /* not JSON or no cal field — normal QR data */ }
+
     const packet = parsePacket(raw);
     if (!packet) return;
     if (this.chunks.has(packet.i)) return;
@@ -97,6 +108,21 @@ export class Receiver {
       } else {
         this.callbacks.onError(result.error);
       }
+    }
+  }
+
+  // ===== Calibration =====
+  private async handleCalibration(command: string): Promise<void> {
+    if (!this.calPlayer) this.calPlayer = new CalibrationTonePlayer();
+    if (command === 'low') {
+      this.calPlayer.playTone(FREQ_ZERO, 2000);
+    } else if (command === 'high') {
+      this.calPlayer.playTone(FREQ_ONE, 2000);
+    } else if (command === 'done') {
+      if (this.calPlayer) this.calPlayer.stop();
+      this.calPlayer = null;
+      // Start modem if not already running
+      if (!this.encoder) this.startAudioFeedback();
     }
   }
 

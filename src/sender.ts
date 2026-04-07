@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { createChunks, createTextChunks, serializePacket, ChunkPacket } from './protocol';
-import { AudioDecoder } from './audio-modem';
+import { AudioDecoder, measurePeakFrequency, FREQ_ZERO, FREQ_ONE } from './audio-modem';
 
 export interface SenderCallbacks {
   onProgress: (current: number, total: number) => void;
@@ -9,6 +9,7 @@ export interface SenderCallbacks {
   onTransferComplete?: () => void;
   onMicLevel?: (level: number) => void;
   onAudioDebug?: (info: string) => void;
+  onCalibrationStatus?: (status: string) => void;
 }
 
 export class Sender {
@@ -131,12 +132,56 @@ export class Sender {
     }
   }
 
-  // ===== Audio Feedback =====
+  // ===== Audio Calibration + Feedback =====
+  private calibratedFreqs: { freqZero: number; freqOne: number } | undefined;
+
+  async startCalibration(): Promise<void> {
+    const status = this.callbacks.onCalibrationStatus;
+    status?.('Calibrating: play LOW tone...');
+
+    // Show calibration QR for low tone
+    await QRCode.toCanvas(this.canvas, JSON.stringify({ cal: 'low' }), {
+      width: 380, margin: 2, errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+    await new Promise((r) => setTimeout(r, 500)); // wait for phone to scan
+
+    // Measure low tone
+    status?.('Measuring LOW frequency...');
+    const low = await measurePeakFrequency(2000, FREQ_ZERO - 200, FREQ_ZERO + 200, 5);
+    status?.(`LOW: ${low.freq} Hz (mag ${low.magnitude.toFixed(0)})`);
+
+    // Show calibration QR for high tone
+    await QRCode.toCanvas(this.canvas, JSON.stringify({ cal: 'high' }), {
+      width: 380, margin: 2, errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Measure high tone
+    status?.('Measuring HIGH frequency...');
+    const high = await measurePeakFrequency(2000, FREQ_ONE - 200, FREQ_ONE + 200, 5);
+    status?.(`HIGH: ${high.freq} Hz (mag ${high.magnitude.toFixed(0)})`);
+
+    // Done — tell phone to start modem
+    await QRCode.toCanvas(this.canvas, JSON.stringify({ cal: 'done' }), {
+      width: 380, margin: 2, errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+    await new Promise((r) => setTimeout(r, 500));
+
+    this.calibratedFreqs = { freqZero: low.freq, freqOne: high.freq };
+    status?.(`Calibrated! ${low.freq}/${high.freq} Hz`);
+
+    console.log(`[CAL] Calibrated: low=${low.freq}Hz (mag=${low.magnitude.toFixed(0)}), high=${high.freq}Hz (mag=${high.magnitude.toFixed(0)})`);
+  }
+
   async startListening(): Promise<void> {
     this.decoder = new AudioDecoder(
       (received) => { this.handleAudioFeedback(received); },
       this.callbacks.onMicLevel,
-      this.callbacks.onAudioDebug
+      this.callbacks.onAudioDebug,
+      this.calibratedFreqs
     );
     await this.decoder.start();
   }

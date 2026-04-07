@@ -258,6 +258,9 @@ async function handleFile(file: File) {
     onAudioDebug: (info) => {
       audioDebug.textContent = info;
     },
+    onCalibrationStatus: (status) => {
+      audioIndicatorText.textContent = status;
+    },
   });
 
   const chunkSize = parseInt(chunkSizeSlider.value);
@@ -271,14 +274,18 @@ btnPlay.addEventListener('click', async () => {
     sender.pause();
   } else {
     qrOverlay.classList.add('hidden');
-    // Start audio feedback listening if enabled
+    // Start audio feedback with calibration if enabled
     if (sendAudioEnabled.checked && !sender.isListening) {
       try {
-        await sender.startListening();
         audioIndicator.classList.remove('hidden');
-        audioIndicatorText.textContent = 'Listening for audio feedback...';
+        audioIndicatorText.textContent = 'Calibrating audio...';
         audioIndicatorDetail.textContent = '';
-      } catch { /* mic optional */ }
+        await sender.startCalibration();
+        await sender.startListening();
+        audioIndicatorText.textContent = 'Listening for audio feedback...';
+      } catch (e) {
+        audioIndicatorText.textContent = 'Audio failed: ' + e;
+      }
     }
     sender.play();
   }

@@ -162,6 +162,79 @@ export function fecDecode(encoded: Uint8Array, originalBitCount: number): Uint8A
   return out;
 }
 
+// ===== Calibration: measure peak frequency from mic =====
+export async function measurePeakFrequency(
+  durationMs: number,
+  minFreq: number,
+  maxFreq: number,
+  stepHz: number = 10
+): Promise<{ freq: number; magnitude: number }> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
+  });
+  const ctx = new AudioContext();
+  await ctx.resume();
+  const sr = ctx.sampleRate;
+  const source = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const allSamples: number[] = [];
+
+  processor.onaudioprocess = (e) => {
+    const input = e.inputBuffer.getChannelData(0);
+    for (let i = 0; i < input.length; i++) allSamples.push(input[i]);
+  };
+  source.connect(processor);
+  processor.connect(ctx.destination);
+
+  await new Promise((r) => setTimeout(r, durationMs));
+
+  processor.disconnect();
+  stream.getTracks().forEach((t) => t.stop());
+  ctx.close();
+
+  // Goertzel sweep to find peak
+  const samples = new Float32Array(allSamples);
+  let bestFreq = minFreq;
+  let bestMag = 0;
+
+  for (let f = minFreq; f <= maxFreq; f += stepHz) {
+    const mag = goertzelMagnitude(samples, 0, samples.length, f, sr);
+    if (mag > bestMag) {
+      bestMag = mag;
+      bestFreq = f;
+    }
+  }
+
+  return { freq: bestFreq, magnitude: bestMag };
+}
+
+// ===== Calibration tone player (used by receiver/phone) =====
+export class CalibrationTonePlayer {
+  private ctx: AudioContext | null = null;
+  private osc: OscillatorNode | null = null;
+
+  async playTone(freq: number, durationMs: number): Promise<void> {
+    this.stop();
+    this.ctx = new AudioContext();
+    await this.ctx.resume();
+    this.osc = this.ctx.createOscillator();
+    this.osc.frequency.value = freq;
+    this.osc.type = 'sine';
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.9;
+    this.osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    this.osc.start();
+    await new Promise((r) => setTimeout(r, durationMs));
+    this.stop();
+  }
+
+  stop(): void {
+    if (this.osc) { try { this.osc.stop(); } catch { /* */ } this.osc = null; }
+    if (this.ctx) { this.ctx.close(); this.ctx = null; }
+  }
+}
+
 // ===== AudioEncoder (Bell 202 FSK) =====
 export class AudioEncoder {
   private ctx: AudioContext | null = null;
@@ -262,6 +335,8 @@ export class AudioDecoder {
 
   private actualSampleRate = SAMPLE_RATE;
   private actualSamplesPerBit = SAMPLES_PER_BIT;
+  private freqZero = FREQ_ZERO;
+  private freqOne = FREQ_ONE;
 
   private state: DecoderState = DecoderState.WAIT_PREAMBLE;
   private bitBuffer: number[] = [];
@@ -278,9 +353,14 @@ export class AudioDecoder {
   constructor(
     onFeedback: (received: Set<number>, totalChunks: number) => void,
     onMicLevel?: (level: number) => void,
-    onDebug?: (info: string) => void
+    onDebug?: (info: string) => void,
+    calibratedFreqs?: { freqZero: number; freqOne: number }
   ) {
     this.onFeedback = onFeedback;
+    if (calibratedFreqs) {
+      this.freqZero = calibratedFreqs.freqZero;
+      this.freqOne = calibratedFreqs.freqOne;
+    }
     this.onMicLevel = onMicLevel ?? null;
     this.onDebug = onDebug ?? null;
   }
@@ -364,8 +444,8 @@ export class AudioDecoder {
   }
 
   private decodeBitFromRing(): number {
-    const mag0 = this.goertzelFromRing(FREQ_ZERO);
-    const mag1 = this.goertzelFromRing(FREQ_ONE);
+    const mag0 = this.goertzelFromRing(this.freqZero);
+    const mag1 = this.goertzelFromRing(this.freqOne);
     this.readPos = (this.readPos + this.actualSamplesPerBit) & (RING_BUFFER_SIZE - 1);
     const maxMag = Math.max(mag0, mag1);
     if (maxMag < NOISE_THRESHOLD) { this.silenceCount++; return -1; }
