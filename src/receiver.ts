@@ -103,14 +103,12 @@ export class Receiver {
   // ===== Audio Feedback =====
   startAudioFeedback(): void {
     this.encoder = new AudioEncoder();
+    // Start immediately with empty bitfield (signals "receiver ready")
+    this.encoder.start(this.receivedChunks, Math.max(this.totalChunks, 1));
     this.feedbackThrottleId = window.setInterval(() => {
-      if (this.feedbackDirty && this.totalChunks > 0 && this.encoder) {
+      if (this.feedbackDirty && this.encoder) {
         this.feedbackDirty = false;
-        if (!this.encoder.isPlaying) {
-          this.encoder.start(this.receivedChunks, this.totalChunks);
-        } else {
-          this.encoder.update(this.receivedChunks, this.totalChunks);
-        }
+        this.encoder.update(this.receivedChunks, Math.max(this.totalChunks, 1));
       }
     }, 200);
   }

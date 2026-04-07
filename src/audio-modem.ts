@@ -188,12 +188,19 @@ export class AudioEncoder {
     }
     const bitfieldBytes = encodeBitfieldRaw(windowSet, windowSize);
 
-    // Payload: [offset_hi][offset_lo][bitfield 4 bytes]
-    const payload = new Uint8Array(2 + bitfieldBytes.length);
+    // Fixed frame: [preamble×2][sync][offset 2B][bitfield 4B][CRC]
+    // No length byte — payload is always 6 bytes, known to both sides
+    const payload = new Uint8Array(6);
     payload[0] = (windowStart >> 8) & 0xff;
     payload[1] = windowStart & 0xff;
     payload.set(bitfieldBytes, 2);
-    const frame = buildFrame(payload);
+    const crcVal = crc8(payload);
+
+    const frame = new Uint8Array(2 + 1 + 6 + 1); // preamble + sync + payload + crc
+    frame[0] = PREAMBLE_BYTE; frame[1] = PREAMBLE_BYTE;
+    frame[2] = SYNC_WORD;
+    frame.set(payload, 3);
+    frame[9] = crcVal;
 
     const waveform = generateWaveformAtRate(frame, actualRate);
 
@@ -403,25 +410,13 @@ export class AudioDecoder {
           const last8 = this.bitBuffer.slice(-8);
           const byte = this.bitsToValue(last8);
           if (byte === SYNC_WORD) {
-            this.state = DecoderState.READ_LENGTH;
+            // Skip READ_LENGTH — payload is always 6 bytes + 1 CRC = 7 bytes
+            this.state = DecoderState.READ_DATA;
+            this.dataLength = 6;
             this.bitBuffer = [];
+            this.bytesCollected = [];
           } else if (this.bitBuffer.length > 32) {
             this.resetState();
-          }
-        }
-        break;
-
-      case DecoderState.READ_LENGTH:
-        this.bitBuffer.push(bit);
-        if (this.bitBuffer.length === 8) {
-          this.dataLength = this.bitsToValue(this.bitBuffer);
-          this.bitBuffer = [];
-          this.bytesCollected = [];
-          // Expected length is 6 (2 offset + 4 bitfield)
-          if (this.dataLength !== 6) {
-            this.resetState();
-          } else {
-            this.state = DecoderState.READ_DATA;
           }
         }
         break;
@@ -431,8 +426,8 @@ export class AudioDecoder {
         if (this.bitBuffer.length === 8) {
           this.bytesCollected.push(this.bitsToValue(this.bitBuffer));
           this.bitBuffer = [];
-          // Read dataLength bytes of data + 1 byte CRC
-          if (this.bytesCollected.length === this.dataLength + 1) {
+          // Read 6 data + 1 CRC = 7 bytes
+          if (this.bytesCollected.length === 7) {
             this.validateFrame();
             this.resetState();
           }
@@ -448,26 +443,20 @@ export class AudioDecoder {
   }
 
   private validateFrame(): void {
-    // Data = [offset_hi][offset_lo][bitfield 8 bytes], last collected byte = CRC
-    const payload = new Uint8Array(this.bytesCollected.slice(0, this.dataLength));
-    const receivedCrc = this.bytesCollected[this.dataLength];
+    // 7 bytes: [6 payload] [1 CRC]
+    const payload = new Uint8Array(this.bytesCollected.slice(0, 6));
+    const receivedCrc = this.bytesCollected[6];
 
-    // CRC over [length, payload...]
-    const crcInput = new Uint8Array(1 + this.dataLength);
-    crcInput[0] = this.dataLength;
-    crcInput.set(payload, 1);
-
-    if (crc8(crcInput) !== receivedCrc) { this.crcFails++; return; }
+    if (crc8(payload) !== receivedCrc) { this.crcFails++; return; }
 
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
 
-    // Parse offset + bitfield
+    // Parse: [offset_hi][offset_lo][bitfield 4 bytes]
     const windowStart = (payload[0] << 8) | payload[1];
     const bitfield = payload.slice(2);
     const windowReceived = decodeBitfieldRaw(bitfield, 32);
 
-    // Map to absolute chunk positions
     const received = new Set<number>();
     for (const relIdx of windowReceived) {
       received.add(windowStart + relIdx);
