@@ -158,12 +158,12 @@ export class AudioEncoder {
     this.stop();
 
     this.ggwave = await getGgwave();
+    // Use default parameters (no custom operating mode — matches ggwave's test pattern)
     const params = this.ggwave.getDefaultParameters();
-    params.sampleRateOut = 48000;
-    params.operatingMode = this.ggwave.GGWAVE_OPERATING_MODE_TX;
     this.instance = this.ggwave.init(params);
 
     const payload = `QRT:${received.size}:${totalChunks}`;
+    // ggwave.encode returns Int8Array at default sample rate (48000)
     const waveform = this.ggwave.encode(
       this.instance, payload,
       this.ggwave.ProtocolId.GGWAVE_PROTOCOL_AUDIBLE_FAST, 10
@@ -171,9 +171,16 @@ export class AudioEncoder {
 
     this.ctx = new AudioContext();
     await this.ctx.resume();
+    const sampleRate = 48000;
 
-    const buffer = this.ctx.createBuffer(1, waveform.length, 48000);
-    buffer.getChannelData(0).set(waveform);
+    // Convert Int8 waveform to Float32 for Web Audio API playback
+    const float32 = new Float32Array(waveform.length);
+    for (let i = 0; i < waveform.length; i++) {
+      float32[i] = waveform[i] / 128.0;
+    }
+
+    const buffer = this.ctx.createBuffer(1, float32.length, sampleRate);
+    buffer.getChannelData(0).set(float32);
 
     this.source = this.ctx.createBufferSource();
     this.source.buffer = buffer;
@@ -240,9 +247,8 @@ export class AudioDecoder {
     });
 
     this.ggwave = await getGgwave();
+    // Use default parameters — ggwave handles sample rate internally
     const params = this.ggwave.getDefaultParameters();
-    params.sampleRateInp = 48000;
-    params.operatingMode = this.ggwave.GGWAVE_OPERATING_MODE_RX;
     this.instance = this.ggwave.init(params);
     this.startTime = Date.now();
     this.decodeCount = 0;
@@ -265,10 +271,10 @@ export class AudioDecoder {
       }
       this.peakLevel = peak;
 
-      // Feed to ggwave (expects Int8Array)
+      // Convert Float32 (-1..1) to Int8 (-128..127) for ggwave
       const int8 = new Int8Array(input.length);
       for (let i = 0; i < input.length; i++) {
-        int8[i] = Math.max(-128, Math.min(127, Math.round(input[i] * 128)));
+        int8[i] = Math.max(-128, Math.min(127, Math.round(input[i] * 127)));
       }
 
       const result = this.ggwave.decode(this.instance, int8);
