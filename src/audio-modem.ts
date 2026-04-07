@@ -242,17 +242,14 @@ export class AudioEncoder {
     await this.ctx.resume(); // ensure not suspended
     const actualRate = this.ctx.sampleRate;
 
-    // Cap bitfield at 4 bytes (32 chunks) for reliable audio transfer with FEC
-    const maxBitfieldChunks = 32;
-    const effectiveChunks = Math.min(totalChunks, maxBitfieldChunks);
-    const bitfieldBytes = encodeBitfieldRaw(received, effectiveChunks);
-
-    // Build inner payload: [length][bitfield][CRC], then FEC encode the whole thing
-    const innerLen = bitfieldBytes.length;
-    const inner = new Uint8Array(1 + innerLen + 1);
-    inner[0] = innerLen;
-    inner.set(bitfieldBytes, 1);
-    inner[1 + innerLen] = crc8(inner.subarray(0, 1 + innerLen));
+    // Send received count + total as 4 bytes (simple, robust, works for any file size)
+    const recvCount = received.size;
+    const inner = new Uint8Array(5); // 4 data + 1 CRC
+    inner[0] = (recvCount >> 8) & 0xff;
+    inner[1] = recvCount & 0xff;
+    inner[2] = (totalChunks >> 8) & 0xff;
+    inner[3] = totalChunks & 0xff;
+    inner[4] = crc8(inner.subarray(0, 4));
 
     const fecData = fecEncode(inner);
 
@@ -570,38 +567,33 @@ export class AudioDecoder {
     const fecData = new Uint8Array(this.bytesCollected);
 
     // FEC decode: 3x repetition → majority vote
-    // Inner payload has (dataLength * 8 / 3) original bits
+    // Inner payload: 5 bytes (4 data + 1 CRC) = 40 bits original
     const originalBitCount = Math.floor(this.dataLength * 8 / 3);
     const inner = fecDecode(fecData, originalBitCount);
 
-    // Inner format: [length][bitfield...][CRC-8]
-    if (inner.length < 2) {
+    // Inner format: [recvHi][recvLo][totalHi][totalLo][CRC-8]
+    if (inner.length < 5) {
       this.crcFails++;
       return;
     }
 
-    const bitfieldLen = inner[0];
-    if (inner.length < 1 + bitfieldLen + 1) {
-      this.crcFails++;
-      return;
-    }
-
-    const bitfield = inner.subarray(1, 1 + bitfieldLen);
-    const receivedCrc = inner[1 + bitfieldLen];
-    const expectedCrc = crc8(inner.subarray(0, 1 + bitfieldLen));
-
-    if (expectedCrc !== receivedCrc) {
+    const expectedCrc = crc8(inner.subarray(0, 4));
+    if (expectedCrc !== inner[4]) {
       this.crcFails++;
       return;
     }
 
     this.crcOk++;
 
-    // Don't fire feedback in the first 2 seconds (avoid false positives from startup noise)
+    // Don't fire feedback in the first 2 seconds
     if (Date.now() - this.startTime < 2000) return;
 
-    const totalChunks = bitfieldLen * 8;
-    const received = decodeBitfieldRaw(bitfield, totalChunks);
+    const recvCount = (inner[0] << 8) | inner[1];
+    const totalChunks = (inner[2] << 8) | inner[3];
+
+    // Build a synthetic received set (first recvCount chunks)
+    const received = new Set<number>();
+    for (let i = 0; i < recvCount; i++) received.add(i);
     this.onFeedback(received, totalChunks);
   }
 
