@@ -5,7 +5,7 @@ import { AudioDecoder } from './audio-modem';
 export interface SenderCallbacks {
   onProgress: (current: number, total: number) => void;
   onReady: (totalChunks: number) => void;
-  onFeedbackReceived?: (received: number, total: number) => void;
+  onFeedbackReceived?: (receivedCount: number, total: number, receivedSet: Set<number>) => void;
   onTransferComplete?: () => void;
   onMicLevel?: (level: number) => void;
   onAudioDebug?: (info: string) => void;
@@ -151,7 +151,7 @@ export class Sender {
   private handleAudioFeedback(received: Set<number>): void {
     const total = this.packets.length;
     if (this.callbacks.onFeedbackReceived) {
-      this.callbacks.onFeedbackReceived(received.size, total);
+      this.callbacks.onFeedbackReceived(received.size, total, received);
     }
 
     const missing: number[] = [];

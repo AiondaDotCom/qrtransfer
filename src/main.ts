@@ -39,6 +39,7 @@ const chunkSizeVal = $('chunk-size-val');
 const speedSlider = $<HTMLInputElement>('speed');
 const speedVal = $('speed-val');
 const qrCanvas = $<HTMLCanvasElement>('qr-canvas');
+const sendChunkGrid = $('send-chunk-grid');
 const qrOverlay = $('qr-overlay');
 const sendCurrent = $('send-current');
 const sendTotal = $('send-total');
@@ -223,18 +224,25 @@ async function handleFile(file: File) {
       sendTotal.textContent = String(total);
       sendProgress.style.width = `${((current + 1) / total) * 100}%`;
     },
-    onFeedbackReceived: (received, total) => {
-      chunkCount.textContent = `${total - received} remaining`;
+    onFeedbackReceived: (receivedCount, total, receivedSet) => {
+      chunkCount.textContent = `${total - receivedCount} remaining`;
       audioIndicatorText.textContent = 'Feedback received!';
-      audioIndicatorDetail.textContent = `${received}/${total}`;
+      audioIndicatorDetail.textContent = `${receivedCount}/${total}`;
       audioIndicator.classList.add('received');
       setTimeout(() => audioIndicator.classList.remove('received'), 600);
+      updateSendChunkGrid(total, receivedSet);
     },
     onTransferComplete: () => {
       chunkCount.textContent = 'Transfer complete!';
       audioIndicatorText.textContent = 'All chunks confirmed!';
       audioIndicatorDetail.textContent = '';
       audioIndicator.classList.add('received');
+      audioDebug.textContent = '';
+      // Mark all chunks as received in grid
+      const cells = sendChunkGrid.children;
+      for (let i = 0; i < cells.length; i++) {
+        (cells[i] as HTMLElement).classList.add('received');
+      }
     },
     onMicLevel: (level) => {
       if (!audioIndicator.classList.contains('hidden')) {
@@ -543,6 +551,27 @@ btnDownload.addEventListener('click', () => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 });
+
+function updateSendChunkGrid(total: number, received: Set<number>) {
+  sendChunkGrid.classList.remove('hidden');
+  if (sendChunkGrid.children.length !== total) {
+    sendChunkGrid.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'chunk-cell';
+      cell.title = `Chunk ${i}`;
+      sendChunkGrid.appendChild(cell);
+    }
+  }
+  const cells = sendChunkGrid.children;
+  for (let i = 0; i < total; i++) {
+    const cell = cells[i] as HTMLElement;
+    if (received.has(i) && !cell.classList.contains('received')) {
+      cell.classList.add('received', 'just-received');
+      setTimeout(() => cell.classList.remove('just-received'), 400);
+    }
+  }
+}
 
 function showError(message: string) {
   const toast = document.createElement('div');
