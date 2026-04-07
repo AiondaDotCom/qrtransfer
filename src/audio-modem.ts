@@ -1,8 +1,8 @@
 import { encodeBitfieldRaw, decodeBitfieldRaw } from './feedback';
 
 // FSK Parameters (Bell 202 Pro — optimized for speaker-to-mic)
-export const FREQ_ZERO = 2000;  // non-harmonic pair (ratio 1.75), both in sweet spot
-export const FREQ_ONE = 3500;   // 1500 Hz apart, no integer harmonic relationship
+export const FREQ_ZERO = 1000;  // pleasant mid-range tones
+export const FREQ_ONE = 1750;   // ratio 1.75 (non-harmonic), 750 Hz apart
 export const BAUD_RATE = 10;    // 100ms per bit — very robust
 export const SAMPLE_RATE = 44100;
 export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE);
