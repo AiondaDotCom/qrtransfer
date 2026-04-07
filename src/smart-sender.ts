@@ -25,6 +25,7 @@ export class SmartSender {
   private stream: MediaStream | null = null;
   private scanIntervalId: number | null = null;
   private completed = false;
+  private facing: 'environment' | 'user' = 'user';
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -65,7 +66,7 @@ export class SmartSender {
     const packet = this.packets[chunkIndex];
     const data = serializePacket(packet);
     await QRCode.toCanvas(this.canvas, data, {
-      width: 300,
+      width: 380,
       margin: 2,
       errorCorrectionLevel: 'M',
       color: { dark: '#000000', light: '#ffffff' },
@@ -76,7 +77,7 @@ export class SmartSender {
   async startCamera(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: 'user',
+        facingMode: this.facing,
         width: { ideal: 640 },
         height: { ideal: 480 },
       },
@@ -165,6 +166,22 @@ export class SmartSender {
       this.pause();
       this.play();
     }
+  }
+
+  async flipCamera(): Promise<void> {
+    this.facing = this.facing === 'environment' ? 'user' : 'environment';
+    if (this.stream) {
+      this.stream.getTracks().forEach((t) => t.stop());
+    }
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: this.facing,
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+    });
+    this.video.srcObject = this.stream;
+    await this.video.play();
   }
 
   stopCamera(): void {

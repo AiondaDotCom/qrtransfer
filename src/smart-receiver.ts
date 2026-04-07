@@ -23,6 +23,7 @@ export class SmartReceiver {
   private stream: MediaStream | null = null;
   private feedbackDirty = false;
   private feedbackThrottleId: number | null = null;
+  private facing: 'environment' | 'user' = 'environment';
 
   constructor(
     video: HTMLVideoElement,
@@ -40,7 +41,7 @@ export class SmartReceiver {
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: 'environment',
+        facingMode: this.facing,
         width: { ideal: 1280 },
         height: { ideal: 720 },
       },
@@ -145,6 +146,22 @@ export class SmartReceiver {
 
   get total(): number {
     return this.totalChunks;
+  }
+
+  async flipCamera(): Promise<void> {
+    this.facing = this.facing === 'environment' ? 'user' : 'environment';
+    if (this.stream) {
+      this.stream.getTracks().forEach((t) => t.stop());
+    }
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: this.facing,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+    this.video.srcObject = this.stream;
+    await this.video.play();
   }
 
   reset(): void {

@@ -18,6 +18,7 @@ export class Receiver {
   private callbacks: ReceiverCallbacks;
   private stream: MediaStream | null = null;
   private lastScannedIndex = -1;
+  private facing: 'environment' | 'user' = 'environment';
 
   constructor(
     video: HTMLVideoElement,
@@ -33,7 +34,7 @@ export class Receiver {
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: 'environment',
+        facingMode: this.facing,
         width: { ideal: 1280 },
         height: { ideal: 720 },
       },
@@ -118,6 +119,22 @@ export class Receiver {
 
   get lastIndex(): number {
     return this.lastScannedIndex;
+  }
+
+  async flipCamera(): Promise<void> {
+    this.facing = this.facing === 'environment' ? 'user' : 'environment';
+    if (this.stream) {
+      this.stream.getTracks().forEach((t) => t.stop());
+    }
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: this.facing,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+    this.video.srcObject = this.stream;
+    await this.video.play();
   }
 
   reset(): void {

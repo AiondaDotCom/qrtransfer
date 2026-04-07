@@ -518,6 +518,12 @@ function showError(message: string) {
   }, 5000);
 }
 
+// ===== Camera Flip (Receive) =====
+const btnFlipCam = $<HTMLButtonElement>('btn-flip-cam');
+btnFlipCam.addEventListener('click', () => {
+  if (receiver) receiver.flipCamera();
+});
+
 // ===== Smart Transfer =====
 const smartModeSend = $<HTMLButtonElement>('smart-mode-send');
 const smartModeRecv = $<HTMLButtonElement>('smart-mode-recv');
@@ -718,6 +724,17 @@ smartBtnStopRecv.addEventListener('click', () => {
   if (smartReceiver) smartReceiver.stop();
   smartRecvIdle.classList.remove('hidden');
   smartRecvActive.classList.add('hidden');
+});
+
+// Smart camera flip buttons
+const btnFlipSmartSend = $<HTMLButtonElement>('btn-flip-smart-send');
+btnFlipSmartSend.addEventListener('click', () => {
+  if (smartSender) smartSender.flipCamera();
+});
+
+const btnFlipSmartRecv = $<HTMLButtonElement>('btn-flip-smart-recv');
+btnFlipSmartRecv.addEventListener('click', () => {
+  if (smartReceiver) smartReceiver.flipCamera();
 });
 
 function updateSmartChunkGrid(total: number, received: Set<number>) {
