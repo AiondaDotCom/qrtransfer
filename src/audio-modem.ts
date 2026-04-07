@@ -8,7 +8,7 @@ export const SAMPLE_RATE = 44100;
 export const SAMPLES_PER_BIT = Math.round(SAMPLE_RATE / BAUD_RATE);
 export const PREAMBLE_BYTE = 0xaa;
 export const SYNC_WORD = 0xd5;
-export const INTER_FRAME_GAP_MS = 50;
+export const INTER_FRAME_GAP_MS = 500;
 export const GAP_SAMPLES = Math.round((INTER_FRAME_GAP_MS / 1000) * SAMPLE_RATE);
 
 // CRC-8/CCITT (polynomial 0x07)
@@ -398,7 +398,7 @@ export class AudioDecoder {
           }
           if (alternating) {
             this.preambleFound++;
-            console.log(`[MODEM] Preamble #${this.preambleFound} found`);
+            console.log(`[MODEM] ${((Date.now()-this.startTime)/1000).toFixed(1)}s Preamble #${this.preambleFound}`);
             this.state = DecoderState.WAIT_SYNC;
             this.bitBuffer = [];
           }
@@ -411,7 +411,7 @@ export class AudioDecoder {
           const last8 = this.bitBuffer.slice(-8);
           const byte = this.bitsToValue(last8);
           if (byte === SYNC_WORD) {
-            console.log(`[MODEM] Sync found, reading 7 bytes...`);
+            console.log(`[MODEM] ${((Date.now()-this.startTime)/1000).toFixed(1)}s Sync found, reading 7 bytes`);
             this.state = DecoderState.READ_DATA;
             this.dataLength = 6;
             this.bitBuffer = [];
@@ -449,7 +449,7 @@ export class AudioDecoder {
     const receivedCrc = this.bytesCollected[6];
     const expectedCrc = crc8(payload);
 
-    console.log(`[MODEM] Frame: [${Array.from(payload).map(x=>'0x'+x.toString(16).padStart(2,'0')).join(',')}] CRC: exp=0x${expectedCrc.toString(16)} got=0x${receivedCrc.toString(16)} ${expectedCrc===receivedCrc?'OK':'FAIL'}`);
+    console.log(`[MODEM] ${((Date.now()-this.startTime)/1000).toFixed(1)}s Frame: [${Array.from(payload).map(x=>'0x'+x.toString(16).padStart(2,'0')).join(',')}] CRC: ${expectedCrc===receivedCrc?'OK':'FAIL'}`);
 
     if (expectedCrc !== receivedCrc) { this.crcFails++; return; }
 
