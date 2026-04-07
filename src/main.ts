@@ -76,6 +76,8 @@ let sendMode: 'file' | 'text' = 'file';
 let downloadBlob: Blob | null = null;
 let downloadFilename = '';
 let receivedText: string | null = null;
+let receivedFileData: Uint8Array | null = null;
+let receivedFilename = '';
 
 // ===== Tab Switching =====
 function switchTab(tab: 'send' | 'receive') {
@@ -415,6 +417,8 @@ function showComplete(data: Uint8Array, metadata: TransferMetadata) {
     btnDownload.classList.add('hidden');
   } else {
     receivedText = null;
+    receivedFileData = data;
+    receivedFilename = metadata.filename;
     recvFilename.textContent = metadata.filename;
     recvFilesize.textContent = formatFileSize(metadata.fileSize);
     recvSummary.textContent = `${metadata.filename} (${formatFileSize(metadata.fileSize)})`;
@@ -446,14 +450,20 @@ btnCopy.addEventListener('click', async () => {
 });
 
 const btnResend = $<HTMLButtonElement>('btn-resend');
-btnResend.addEventListener('click', () => {
-  if (!receivedText) return;
-  // Switch to send tab in text mode with the received text
-  switchTab('send');
-  switchSendMode('text');
-  textInput.value = receivedText;
-  textCharCount.textContent = `${receivedText.length} characters`;
-  handleText(receivedText);
+btnResend.addEventListener('click', async () => {
+  if (receivedText) {
+    switchTab('send');
+    switchSendMode('text');
+    textInput.value = receivedText;
+    textCharCount.textContent = `${receivedText.length} characters`;
+    handleText(receivedText);
+  } else if (receivedFileData) {
+    // Create a File object from received data and send it
+    const file = new File([receivedFileData as unknown as BlobPart], receivedFilename);
+    switchTab('send');
+    switchSendMode('file');
+    await handleFile(file);
+  }
 });
 
 btnDownload.addEventListener('click', () => {

@@ -248,12 +248,17 @@ header {
   margin-bottom: 12px;
 }
 
-.text-actions {
-  display: flex;
-  gap: 8px;
+.text-result .btn {
+  width: 100%;
 }
 
-.text-actions .btn {
+.complete-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.complete-actions .btn {
   flex: 1;
 }
 
