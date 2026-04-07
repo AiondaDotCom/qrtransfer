@@ -260,17 +260,26 @@ export class AudioEncoder {
     await this.ctx.resume();
     const actualRate = this.ctx.sampleRate;
 
-    // High water mark: first chunk NOT received (= everything before is done)
-    let highWater = 0;
-    for (let i = 0; i < totalChunks; i++) {
-      if (!received.has(i)) break;
-      highWater = i + 1;
+    // Find longest contiguous run of received chunks
+    let bestStart = 0, bestLen = 0;
+    let runStart = -1, runLen = 0;
+    for (let i = 0; i <= totalChunks; i++) {
+      if (received.has(i)) {
+        if (runStart < 0) runStart = i;
+        runLen++;
+      } else {
+        if (runLen > bestLen) { bestStart = runStart; bestLen = runLen; }
+        runStart = -1; runLen = 0;
+      }
     }
+    // Scale start to fit in 1 byte (multiply by 4 on decode for large files)
+    const startScaled = Math.min(255, Math.floor(bestStart / 4));
+    const lenCapped = Math.min(255, bestLen);
 
-    // Tiny frame: [preamble×4][sync][hwHi][hwLo][CRC] = 8 bytes only
+    // Frame: [preamble×4][sync][start][length][CRC] = 8 bytes
     const payload = new Uint8Array(2);
-    payload[0] = (highWater >> 8) & 0xff;
-    payload[1] = highWater & 0xff;
+    payload[0] = startScaled;
+    payload[1] = lenCapped;
     const crcVal = crc8(payload);
 
     const frame = new Uint8Array(8);
@@ -544,11 +553,13 @@ export class AudioDecoder {
     this.crcOk++;
     if (Date.now() - this.startTime < 2000) return;
 
-    // High water mark: chunks 0 through highWater-1 are received
-    const highWater = (payload[0] << 8) | payload[1];
+    // Decode: start (scaled ×4) + length = contiguous range
+    const rangeStart = payload[0] * 4;
+    const rangeLen = payload[1];
+    console.log(`[MODEM] Range: chunks ${rangeStart}-${rangeStart + rangeLen - 1} (${rangeLen} chunks)`);
     const received = new Set<number>();
-    for (let i = 0; i < highWater; i++) received.add(i);
-    this.onFeedback(received, highWater);
+    for (let i = rangeStart; i < rangeStart + rangeLen; i++) received.add(i);
+    this.onFeedback(received, rangeStart + rangeLen);
   }
 
   stop(): void {
