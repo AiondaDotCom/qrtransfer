@@ -306,7 +306,8 @@ header {
   color: var(--text-muted);
 }
 
-#file-input {
+#file-input,
+#smart-file-input {
   display: none;
 }
 
