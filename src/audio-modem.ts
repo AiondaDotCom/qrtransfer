@@ -379,6 +379,7 @@ export class AudioDecoder {
   }
 
   async start(): Promise<void> {
+    console.log(`[MODEM] Decoder starting with freqs ${this.freqZero}/${this.freqOne} Hz`);
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -411,6 +412,7 @@ export class AudioDecoder {
     this.processor.connect(this.ctx.destination);
     this._isListening = true;
     this.resetState();
+    console.log(`[MODEM] Decoder running, sampleRate=${this.actualSampleRate}, SPB=${this.actualSamplesPerBit}`);
 
     this.processIntervalId = window.setInterval(() => {
       this.processAccumulated();
