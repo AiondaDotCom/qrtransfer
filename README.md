@@ -2,7 +2,7 @@
 
 Offline file transfer via QR codes. One single HTML file — no server, no cloud, no tracking.
 
-**[Try it live](https://aiondadotcom.github.io/qrtransfer/)** | [Download HTML](https://github.com/AiondaDotCom/qrtransfer/releases/latest)
+**[Try it live](https://qr.aionda.com)** | [Download HTML](https://github.com/AiondaDotCom/qrtransfer/releases/latest)
 
 ## How it works
 
@@ -24,7 +24,7 @@ Offline file transfer via QR codes. One single HTML file — no server, no cloud
 
 ## Quick Start
 
-1. **Online**: Open the [live demo](https://aiondadotcom.github.io/qrtransfer/) on both devices
+1. **Online**: Open the [live demo](https://qr.aionda.com) on both devices
 2. **Offline**: Download [`index.html`](https://github.com/AiondaDotCom/qrtransfer/releases/latest) and open it in any modern browser
 
 Default settings: 300 B chunk size, 100 ms speed.
