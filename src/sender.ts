@@ -1,15 +1,12 @@
 import QRCode from 'qrcode';
 import { createChunks, createTextChunks, serializePacket, ChunkPacket } from './protocol';
-import { AudioDecoder, CalibrationMic, FREQ_ZERO, FREQ_ONE } from './audio-modem';
+import { FeedbackPacket, getMissingChunks } from './feedback';
 
 export interface SenderCallbacks {
   onProgress: (current: number, total: number) => void;
   onReady: (totalChunks: number) => void;
   onFeedbackReceived?: (receivedCount: number, total: number, receivedSet: Set<number>) => void;
   onTransferComplete?: () => void;
-  onMicLevel?: (level: number) => void;
-  onAudioDebug?: (info: string) => void;
-  onCalibrationStatus?: (status: string) => void;
 }
 
 export class Sender {
@@ -21,8 +18,7 @@ export class Sender {
   private canvas: HTMLCanvasElement;
   private callbacks: SenderCallbacks;
 
-  // Audio feedback (optional)
-  private decoder: AudioDecoder | null = null;
+  // Adaptive playlist (updated by feedback)
   private playlist: number[] | null = null;
   private playlistIndex = 0;
   private completed = false;
@@ -132,107 +128,24 @@ export class Sender {
     }
   }
 
-  // ===== Audio Calibration + Feedback =====
-  private calibratedFreqs: { freqZero: number; freqOne: number } | undefined;
-
-  async startCalibration(): Promise<void> {
-    const status = this.callbacks.onCalibrationStatus;
-    const calQR = async (data: string) => {
-      await QRCode.toCanvas(this.canvas, data, {
-        width: 380, margin: 2, errorCorrectionLevel: 'M',
-        color: { dark: '#000000', light: '#ffffff' },
-      });
-    };
-
-    // Open mic once for all measurements
-    status?.('Opening microphone...');
-    const mic = await CalibrationMic.open();
-
-    // Helper: detect 3-beep pattern (on-off-on-off-on)
-    const detect3Beeps = async (minF: number, maxF: number, label: string): Promise<{ freq: number; magnitude: number }> => {
-      const THRESH = 15;
-      let beeps = 0;
-      let wasLoud = false;
-      let bestResult = { freq: (minF + maxF) / 2, magnitude: 0 };
-
-      while (beeps < 2) {
-        const m = await mic.measurePeak(300, minF, maxF, 5);
-        const loud = m.magnitude > THRESH;
-
-        if (loud && !wasLoud) {
-          beeps++;
-          if (m.magnitude > bestResult.magnitude) bestResult = m;
-          status?.(`${label}: beep ${beeps}/3 (${m.freq} Hz, mag ${m.magnitude.toFixed(0)})`);
-        } else if (!loud && wasLoud) {
-          // silence after beep — good, waiting for next
-        } else if (!loud) {
-          status?.(`${label}: waiting for beep ${beeps + 1}/3...`);
-        }
-        wasLoud = loud;
-      }
-
-      // Fine measurement on the detected frequency
-      status?.(`${label}: measuring precisely...`);
-      const fine = await mic.measurePeak(1000, bestResult.freq - 50, bestResult.freq + 50, 2);
-      return fine;
-    };
-
-    // --- LOW TONE ---
-    status?.('Point phone at screen. Waiting for 3 beeps...');
-    await calQR('{"cal":"low"}');
-    const lowFinal = await detect3Beeps(FREQ_ZERO - 300, FREQ_ZERO + 300, 'LOW');
-    status?.(`LOW: ${lowFinal.freq} Hz`);
-
-    // --- HIGH TONE ---
-    await calQR('{"cal":"high"}');
-    const highFinal = await detect3Beeps(FREQ_ONE - 300, FREQ_ONE + 300, 'HIGH');
-    status?.(`HIGH: ${highFinal.freq} Hz`);
-
-    mic.close();
-
-    // Tell phone to start modem
-    await calQR('{"cal":"done"}');
-    await new Promise((r) => setTimeout(r, 1000));
-
-    this.calibratedFreqs = { freqZero: lowFinal.freq, freqOne: highFinal.freq };
-    status?.(`Calibrated! ${lowFinal.freq}/${highFinal.freq} Hz`);
-    console.log(`[CAL] low=${lowFinal.freq}Hz high=${highFinal.freq}Hz`);
-  }
-
-  async startListening(): Promise<void> {
-    this.decoder = new AudioDecoder(
-      (received) => { this.handleAudioFeedback(received); },
-      this.callbacks.onMicLevel,
-      this.callbacks.onAudioDebug,
-      this.calibratedFreqs
-    );
-    await this.decoder.start();
-  }
-
-  stopListening(): void {
-    if (this.decoder) {
-      this.decoder.stop();
-      this.decoder = null;
-    }
-  }
-
-  private handleAudioFeedback(received: Set<number>): void {
+  // ===== QR Feedback =====
+  applyFeedback(packet: FeedbackPacket): void {
     const total = this.packets.length;
+    const missing = getMissingChunks(packet);
+
+    // Build received set from the feedback
+    const received = new Set<number>();
+    for (let i = 0; i < packet.t; i++) {
+      if (!missing.includes(i)) received.add(i);
+    }
 
     if (this.callbacks.onFeedbackReceived) {
       this.callbacks.onFeedbackReceived(received.size, total, received);
     }
 
-    // Build playlist: skip received chunks, only send missing ones
-    const missing: number[] = [];
-    for (let i = 0; i < total; i++) {
-      if (!received.has(i)) missing.push(i);
-    }
-
     if (missing.length === 0) {
       this.completed = true;
       this.pause();
-      this.stopListening();
       if (this.callbacks.onTransferComplete) {
         this.callbacks.onTransferComplete();
       }
@@ -248,10 +161,6 @@ export class Sender {
     return this.playing;
   }
 
-  get isListening(): boolean {
-    return this.decoder?.isListening ?? false;
-  }
-
   get totalPackets(): number {
     return this.packets.length;
   }
@@ -262,7 +171,6 @@ export class Sender {
 
   destroy(): void {
     this.pause();
-    this.stopListening();
     this.packets = [];
     this.currentIndex = 0;
     this.playlist = null;

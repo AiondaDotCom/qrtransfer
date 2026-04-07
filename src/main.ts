@@ -2,6 +2,8 @@ import './styles.css';
 import { Sender } from './sender';
 import { Receiver } from './receiver';
 import { formatFileSize, TransferMetadata } from './protocol';
+import jsQR from 'jsqr';
+import { parseFeedback, getMissingChunks } from './feedback';
 
 // ===== DOM Elements =====
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -18,14 +20,6 @@ const textInputZone = $('text-input-zone');
 const textInput = $<HTMLTextAreaElement>('text-input');
 const textCharCount = $('text-char-count');
 const btnGenerateQR = $<HTMLButtonElement>('btn-generate-qr');
-
-// Audio feedback toggles
-const sendAudioEnabled = $<HTMLInputElement>('send-audio-enabled');
-const recvAudioEnabled = $<HTMLInputElement>('recv-audio-enabled');
-const audioIndicator = $('audio-feedback-indicator');
-const audioIndicatorText = $('audio-indicator-text');
-const audioIndicatorDetail = $('audio-indicator-detail');
-const audioDebug = $('audio-debug');
 
 // Send elements
 const dropZone = $('drop-zone');
@@ -51,6 +45,14 @@ const iconPlay = $('icon-play');
 const iconPause = $('icon-pause');
 const playLabel = $('play-label');
 
+// Feedback scanner (sender)
+const btnScanFeedback = $<HTMLButtonElement>('btn-scan-feedback');
+const feedbackScanner = $('feedback-scanner');
+const feedbackCamera = $<HTMLVideoElement>('feedback-camera');
+const feedbackScanCanvas = $<HTMLCanvasElement>('feedback-scan-canvas');
+const btnCancelScan = $<HTMLButtonElement>('btn-cancel-scan');
+const feedbackResult = $('feedback-result');
+
 // Receive elements
 const receiveIdle = $('receive-idle');
 const receiveActive = $('receive-active');
@@ -75,6 +77,13 @@ const textResult = $('text-result');
 const textContent = $<HTMLPreElement>('text-content');
 const btnCopy = $<HTMLButtonElement>('btn-copy');
 const copyLabel = $('copy-label');
+
+// Feedback QR (receiver)
+const btnShowFeedback = $<HTMLButtonElement>('btn-show-feedback');
+const feedbackQROverlay = $('feedback-qr-overlay');
+const feedbackQRCanvas = $<HTMLCanvasElement>('feedback-qr-canvas');
+const feedbackQRInfo = $('feedback-qr-info');
+const btnDismissFeedback = $<HTMLButtonElement>('btn-dismiss-feedback');
 
 // ===== State =====
 let sender: Sender | null = null;
@@ -104,14 +113,8 @@ function switchSendMode(mode: 'file' | 'text') {
   sendMode = mode;
   modeFile.classList.toggle('active', mode === 'file');
   modeText.classList.toggle('active', mode === 'text');
-
-  // Reset active send display when switching modes
-  if (sender) {
-    sender.destroy();
-    sender = null;
-  }
+  if (sender) { sender.destroy(); sender = null; }
   sendActive.classList.add('hidden');
-
   if (mode === 'file') {
     dropZone.classList.remove('hidden');
     textInputZone.classList.add('hidden');
@@ -136,37 +139,12 @@ async function handleText(text: string) {
   if (!text.trim()) return;
   currentText = text;
   currentFile = null;
-
   if (sender) sender.destroy();
-
-  sender = new Sender(qrCanvas, {
-    onReady: (total) => {
-      textInputZone.classList.add('hidden');
-      sendActive.classList.remove('hidden');
-      fileName.textContent = 'Text snippet';
-      fileSize.textContent = formatFileSize(new TextEncoder().encode(text).length);
-      chunkCount.textContent = `${total} chunk${total > 1 ? 's' : ''}`;
-      sendTotal.textContent = String(total);
-      sendCurrent.textContent = '1';
-      sendProgress.style.width = `${(1 / total) * 100}%`;
-      if (total === 1) {
-        qrOverlay.classList.add('hidden');
-      } else {
-        qrOverlay.classList.remove('hidden');
-      }
-      updatePlayButton();
-    },
-    onProgress: (current, total) => {
-      sendCurrent.textContent = String(current + 1);
-      sendTotal.textContent = String(total);
-      sendProgress.style.width = `${((current + 1) / total) * 100}%`;
-    },
-  });
-
+  sender = new Sender(qrCanvas, createSenderCallbacks());
   const chunkSize = parseInt(chunkSizeSlider.value);
   await sender.loadText(text, chunkSize);
-
-  // Auto-play if multiple chunks
+  textInputZone.classList.add('hidden');
+  sendActive.classList.remove('hidden');
   if (sender.totalPackets > 1) {
     qrOverlay.classList.add('hidden');
     sender.play();
@@ -177,94 +155,60 @@ async function handleText(text: string) {
 // ===== Send: File Selection =====
 dropZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
-  if (fileInput.files && fileInput.files[0]) {
-    handleFile(fileInput.files[0]);
-  }
+  if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
 });
-
-dropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZone.classList.add('drag-over');
-});
-
-dropZone.addEventListener('dragleave', () => {
-  dropZone.classList.remove('drag-over');
-});
-
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
 dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  if (e.dataTransfer?.files[0]) {
-    handleFile(e.dataTransfer.files[0]);
-  }
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer?.files[0]) handleFile(e.dataTransfer.files[0]);
 });
 
-async function handleFile(file: File) {
-  currentFile = file;
-
-  if (sender) {
-    sender.destroy();
-  }
-
-  sender = new Sender(qrCanvas, {
-    onReady: (total) => {
+function createSenderCallbacks() {
+  return {
+    onReady: (total: number) => {
       dropZone.classList.add('hidden');
       sendActive.classList.remove('hidden');
-      fileName.textContent = file.name;
-      fileSize.textContent = formatFileSize(file.size);
-      chunkCount.textContent = `${total} chunks`;
       sendTotal.textContent = String(total);
       sendCurrent.textContent = '1';
       sendProgress.style.width = `${(1 / total) * 100}%`;
       qrOverlay.classList.remove('hidden');
       updatePlayButton();
-      // Initialize send chunk grid
       initSendChunkGrid(total);
     },
-    onProgress: (current, total) => {
+    onProgress: (current: number, total: number) => {
       sendCurrent.textContent = String(current + 1);
       sendTotal.textContent = String(total);
       sendProgress.style.width = `${((current + 1) / total) * 100}%`;
-      // Highlight current chunk being sent
       highlightSendingChunk(current, total);
     },
-    onFeedbackReceived: (receivedCount, total, receivedSet) => {
+    onFeedbackReceived: (receivedCount: number, total: number, receivedSet: Set<number>) => {
       chunkCount.textContent = `${total - receivedCount} remaining`;
-      audioIndicatorText.textContent = 'Feedback received!';
-      audioIndicatorDetail.textContent = `${receivedCount}/${total}`;
-      audioIndicator.classList.add('received');
-      setTimeout(() => audioIndicator.classList.remove('received'), 600);
+      feedbackResult.classList.remove('hidden');
+      feedbackResult.textContent = `Feedback: ${receivedCount}/${total} confirmed, ${total - receivedCount} remaining`;
       updateSendChunkGrid(total, receivedSet);
     },
     onTransferComplete: () => {
       chunkCount.textContent = 'Transfer complete!';
-      audioIndicatorText.textContent = 'All chunks confirmed!';
-      audioIndicatorDetail.textContent = '';
-      audioIndicator.classList.add('received');
-      audioDebug.textContent = '';
-      // Mark all chunks as received in grid
+      feedbackResult.textContent = 'All chunks confirmed!';
       const cells = sendChunkGrid.children;
       for (let i = 0; i < cells.length; i++) {
         (cells[i] as HTMLElement).classList.add('received');
       }
     },
-    onMicLevel: (level) => {
-      if (!audioIndicator.classList.contains('hidden')) {
-        const pct = Math.min(100, Math.round(level * 1000));
-        const bar = '\u2588'.repeat(Math.round(pct / 5)) + '\u2591'.repeat(20 - Math.round(pct / 5));
-        audioIndicatorDetail.textContent = `Mic: ${bar} ${pct}%`;
-      }
-    },
-    onAudioDebug: (info) => {
-      audioDebug.textContent = info;
-    },
-    onCalibrationStatus: (status) => {
-      audioIndicatorText.textContent = status;
-    },
-  });
+  };
+}
 
+async function handleFile(file: File) {
+  currentFile = file;
+  currentText = null;
+  if (sender) sender.destroy();
+  sender = new Sender(qrCanvas, createSenderCallbacks());
+  fileName.textContent = file.name;
+  fileSize.textContent = formatFileSize(file.size);
   const chunkSize = parseInt(chunkSizeSlider.value);
   await sender.loadFile(file, chunkSize);
+  chunkCount.textContent = `${sender.totalPackets} chunks`;
 }
 
 // ===== Send: Controls =====
@@ -274,56 +218,13 @@ btnPlay.addEventListener('click', async () => {
     sender.pause();
   } else {
     qrOverlay.classList.add('hidden');
-    // Start audio feedback with calibration if enabled
-    if (sendAudioEnabled.checked && !sender.isListening) {
-      try {
-        audioIndicator.classList.remove('hidden');
-        audioIndicatorText.textContent = 'Calibrating audio...';
-        audioIndicatorDetail.textContent = '';
-        await sender.startCalibration();
-        await sender.startListening();
-        audioIndicatorText.textContent = 'Listening for audio feedback...';
-      } catch (e) {
-        audioIndicatorText.textContent = 'Audio failed: ' + e;
-      }
-    }
     sender.play();
   }
   updatePlayButton();
 });
 
-// Allow toggling audio feedback while playing
-sendAudioEnabled.addEventListener('change', async () => {
-  if (!sender) return;
-  if (sendAudioEnabled.checked && !sender.isListening) {
-    try {
-      audioIndicator.classList.remove('hidden');
-      audioIndicatorText.textContent = 'Calibrating audio...';
-      sender.pause();
-      await sender.startCalibration();
-      await sender.startListening();
-      audioIndicatorText.textContent = 'Listening for audio feedback...';
-      sender.play();
-      updatePlayButton();
-    } catch { /* mic optional */ }
-  } else if (!sendAudioEnabled.checked && sender.isListening) {
-    sender.stopListening();
-    audioIndicator.classList.add('hidden');
-    sendChunkGrid.classList.add('hidden');
-  }
-});
-
-btnPrev.addEventListener('click', () => {
-  if (!sender) return;
-  qrOverlay.classList.add('hidden');
-  sender.prev();
-});
-
-btnNext.addEventListener('click', () => {
-  if (!sender) return;
-  qrOverlay.classList.add('hidden');
-  sender.next();
-});
+btnPrev.addEventListener('click', () => { if (sender) { qrOverlay.classList.add('hidden'); sender.prev(); } });
+btnNext.addEventListener('click', () => { if (sender) { qrOverlay.classList.add('hidden'); sender.next(); } });
 
 function updatePlayButton() {
   if (!sender) return;
@@ -333,44 +234,122 @@ function updatePlayButton() {
   playLabel.textContent = playing ? 'Pause' : 'Play';
 }
 
-// ===== Send: Settings =====
-chunkSizeSlider.addEventListener('input', () => {
-  chunkSizeVal.textContent = `${chunkSizeSlider.value} B`;
-});
-
+chunkSizeSlider.addEventListener('input', () => { chunkSizeVal.textContent = `${chunkSizeSlider.value} B`; });
 chunkSizeSlider.addEventListener('change', async () => {
   if (!sender) return;
   if (!currentFile && !currentText) return;
   sender.destroy();
-  sender = new Sender(qrCanvas, {
-    onReady: (total) => {
-      chunkCount.textContent = `${total} chunk${total > 1 ? 's' : ''}`;
-      sendTotal.textContent = String(total);
-      sendCurrent.textContent = '1';
-      sendProgress.style.width = `${(1 / total) * 100}%`;
-      qrOverlay.classList.remove('hidden');
-      updatePlayButton();
-    },
-    onProgress: (current, total) => {
-      sendCurrent.textContent = String(current + 1);
-      sendTotal.textContent = String(total);
-      sendProgress.style.width = `${((current + 1) / total) * 100}%`;
-    },
-  });
+  sender = new Sender(qrCanvas, createSenderCallbacks());
   const cs = parseInt(chunkSizeSlider.value);
-  if (currentFile) {
-    await sender.loadFile(currentFile, cs);
-  } else if (currentText) {
-    await sender.loadText(currentText, cs);
-  }
+  if (currentFile) await sender.loadFile(currentFile, cs);
+  else if (currentText) await sender.loadText(currentText, cs);
 });
-
 speedSlider.addEventListener('input', () => {
   speedVal.textContent = `${speedSlider.value} ms`;
-  if (sender) {
-    sender.setSpeed(parseInt(speedSlider.value));
-  }
+  if (sender) sender.setSpeed(parseInt(speedSlider.value));
 });
+
+// ===== Send: Scan Feedback QR =====
+let feedbackStream: MediaStream | null = null;
+let scanningFeedback = false;
+
+btnScanFeedback.addEventListener('click', async () => {
+  if (!sender) return;
+  const wasPlaying = sender.isPlaying;
+  if (wasPlaying) sender.pause();
+
+  scanningFeedback = true;
+  feedbackScanner.classList.remove('hidden');
+
+  try {
+    feedbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    feedbackCamera.srcObject = feedbackStream;
+    await feedbackCamera.play();
+  } catch {
+    stopFeedbackScan();
+    if (wasPlaying) sender.play();
+    updatePlayButton();
+    return;
+  }
+
+  const ctx = feedbackScanCanvas.getContext('2d', { willReadFrequently: true })!;
+  const scanLoop = () => {
+    if (!scanningFeedback) return;
+    if (feedbackCamera.readyState === feedbackCamera.HAVE_ENOUGH_DATA) {
+      feedbackScanCanvas.width = feedbackCamera.videoWidth;
+      feedbackScanCanvas.height = feedbackCamera.videoHeight;
+      ctx.drawImage(feedbackCamera, 0, 0);
+      const imageData = ctx.getImageData(0, 0, feedbackScanCanvas.width, feedbackScanCanvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code && code.data) {
+        const packet = parseFeedback(code.data);
+        if (packet) {
+          stopFeedbackScan();
+          sender!.applyFeedback(packet);
+          if (wasPlaying) sender!.play();
+          updatePlayButton();
+          return;
+        }
+      }
+    }
+    requestAnimationFrame(scanLoop);
+  };
+  requestAnimationFrame(scanLoop);
+});
+
+function stopFeedbackScan() {
+  scanningFeedback = false;
+  if (feedbackStream) {
+    feedbackStream.getTracks().forEach(t => t.stop());
+    feedbackStream = null;
+  }
+  feedbackScanner.classList.add('hidden');
+}
+
+btnCancelScan.addEventListener('click', () => {
+  stopFeedbackScan();
+  if (sender && !sender.isPlaying) { sender.play(); updatePlayButton(); }
+});
+
+// ===== Send: Chunk Grid =====
+function initSendChunkGrid(total: number) {
+  sendChunkGrid.classList.remove('hidden');
+  sendChunkGrid.innerHTML = '';
+  for (let i = 0; i < total; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'chunk-cell';
+    cell.title = `Chunk ${i}`;
+    sendChunkGrid.appendChild(cell);
+  }
+}
+
+function highlightSendingChunk(current: number, total: number) {
+  if (sendChunkGrid.children.length !== total) return;
+  const prev = sendChunkGrid.querySelector('.sending');
+  if (prev) prev.classList.remove('sending');
+  const cell = sendChunkGrid.children[current] as HTMLElement;
+  if (cell && !cell.classList.contains('received')) cell.classList.add('sending');
+}
+
+function updateSendChunkGrid(total: number, received: Set<number>) {
+  sendChunkGrid.classList.remove('hidden');
+  if (sendChunkGrid.children.length !== total) {
+    sendChunkGrid.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'chunk-cell';
+      sendChunkGrid.appendChild(cell);
+    }
+  }
+  const cells = sendChunkGrid.children;
+  for (let i = 0; i < total; i++) {
+    const cell = cells[i] as HTMLElement;
+    if (received.has(i) && !cell.classList.contains('received')) {
+      cell.classList.add('received', 'just-received');
+      setTimeout(() => cell.classList.remove('just-received'), 400);
+    }
+  }
+}
 
 // ===== Receive: Camera =====
 let scanFlashTimeout: number | null = null;
@@ -380,43 +359,26 @@ btnStartScan.addEventListener('click', async () => {
   receiveActive.classList.remove('hidden');
   receiveComplete.classList.add('hidden');
   recvInfo.classList.add('hidden');
+  btnShowFeedback.classList.add('hidden');
 
   receiver = new Receiver(cameraVideo, scanCanvas, {
     onChunkReceived: (index, total, received) => {
       recvInfo.classList.remove('hidden');
-
-      // Update filename from chunk 0
-      if (index === 0) {
-        // We need to get metadata from the receiver... let's read it from the DOM update
-      }
-
+      btnShowFeedback.classList.remove('hidden');
       recvCurrent.textContent = String(received);
       recvTotal.textContent = String(total);
       recvProgress.style.width = `${(received / total) * 100}%`;
-
-      // Update chunk grid
       updateChunkGrid(total, receiver!.receivedChunks);
-
-      // Flash indicator
       scanIndicator.classList.remove('hidden');
       if (scanFlashTimeout) clearTimeout(scanFlashTimeout);
-      scanFlashTimeout = window.setTimeout(() => {
-        scanIndicator.classList.add('hidden');
-      }, 500);
+      scanFlashTimeout = window.setTimeout(() => { scanIndicator.classList.add('hidden'); }, 500);
     },
-    onComplete: (data, metadata) => {
-      showComplete(data, metadata);
-    },
-    onError: (error) => {
-      showError(error);
-    },
+    onComplete: (data, metadata) => { showComplete(data, metadata); },
+    onError: (error) => { showError(error); },
   });
 
   try {
     await receiver.start();
-    if (recvAudioEnabled.checked) {
-      receiver.startAudioFeedback();
-    }
   } catch (err) {
     showError(`Camera access denied: ${err}`);
     receiveIdle.classList.remove('hidden');
@@ -424,39 +386,36 @@ btnStartScan.addEventListener('click', async () => {
   }
 });
 
-// Allow toggling audio feedback while receiving
-recvAudioEnabled.addEventListener('change', () => {
-  if (!receiver) return;
-  if (recvAudioEnabled.checked && !receiver.isAudioFeedbackActive) {
-    receiver.startAudioFeedback();
-  } else if (!recvAudioEnabled.checked && receiver.isAudioFeedbackActive) {
-    receiver.stopAudioFeedback();
-  }
-});
-
 btnStopScan.addEventListener('click', () => {
-  if (receiver) {
-    receiver.stop();
-  }
+  if (receiver) receiver.stop();
   receiveIdle.classList.remove('hidden');
   receiveActive.classList.add('hidden');
 });
 
 btnResetScan.addEventListener('click', () => {
-  if (receiver) {
-    receiver.reset();
-  }
+  if (receiver) receiver.reset();
   recvInfo.classList.add('hidden');
   receiveComplete.classList.add('hidden');
   chunkGrid.innerHTML = '';
   recvCurrent.textContent = '0';
   recvTotal.textContent = '0';
   recvProgress.style.width = '0%';
-
-  // Restart
   btnStartScan.click();
 });
 
+// ===== Receive: Show Feedback QR =====
+btnShowFeedback.addEventListener('click', async () => {
+  if (!receiver || receiver.receivedCount === 0) return;
+  await receiver.renderFeedbackQR(feedbackQRCanvas);
+  feedbackQRInfo.textContent = `${receiver.receivedCount}/${receiver.total} chunks received`;
+  feedbackQROverlay.classList.remove('hidden');
+});
+
+btnDismissFeedback.addEventListener('click', () => {
+  feedbackQROverlay.classList.add('hidden');
+});
+
+// ===== Receive: Chunk Grid =====
 function updateChunkGrid(total: number, received: Set<number>) {
   if (chunkGrid.children.length !== total) {
     chunkGrid.innerHTML = '';
@@ -467,7 +426,6 @@ function updateChunkGrid(total: number, received: Set<number>) {
       chunkGrid.appendChild(cell);
     }
   }
-
   const cells = chunkGrid.children;
   for (let i = 0; i < total; i++) {
     const cell = cells[i] as HTMLElement;
@@ -476,28 +434,18 @@ function updateChunkGrid(total: number, received: Set<number>) {
       setTimeout(() => cell.classList.remove('just-received'), 400);
     }
   }
-
-  // Update filename/size from first chunk
-  if (received.has(0)) {
-    // Parse info from receiver state — we read the filename from the first packet
-    const firstCell = chunkGrid.querySelector('.chunk-cell');
-    if (firstCell && recvFilename.textContent === '-') {
-      // The metadata is in the assembled chunks; we need another way
-      // Let's try to get it from the chunk data
-    }
-  }
 }
 
+// ===== Receive: Complete =====
 function showComplete(data: Uint8Array, metadata: TransferMetadata) {
   receiveComplete.classList.remove('hidden');
   recvInfo.classList.remove('hidden');
   recvCrc.textContent = `CRC32: ${metadata.hash}`;
-
-  // Hide camera
   const cameraWrapper = receiveActive.querySelector('.camera-wrapper') as HTMLElement;
   if (cameraWrapper) cameraWrapper.classList.add('hidden');
   const recvControls = receiveActive.querySelector('.receive-controls') as HTMLElement;
   if (recvControls) recvControls.classList.add('hidden');
+  btnShowFeedback.classList.add('hidden');
 
   if (metadata.type === 'text') {
     const text = new TextDecoder().decode(data);
@@ -530,13 +478,9 @@ btnCopy.addEventListener('click', async () => {
     copyLabel.textContent = 'Copied!';
     setTimeout(() => { copyLabel.textContent = 'Copy to Clipboard'; }, 2000);
   } catch {
-    // Fallback for older browsers
     const ta = document.createElement('textarea');
     ta.value = receivedText;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
     copyLabel.textContent = 'Copied!';
     setTimeout(() => { copyLabel.textContent = 'Copy to Clipboard'; }, 2000);
   }
@@ -545,40 +489,30 @@ btnCopy.addEventListener('click', async () => {
 const btnResend = $<HTMLButtonElement>('btn-resend');
 btnResend.addEventListener('click', async () => {
   if (receivedText) {
-    switchTab('send');
-    switchSendMode('text');
+    switchTab('send'); switchSendMode('text');
     textInput.value = receivedText;
     textCharCount.textContent = `${receivedText.length} characters`;
     handleText(receivedText);
   } else if (receivedFileData) {
-    // Create a File object from received data and send it
     const file = new File([receivedFileData as unknown as BlobPart], receivedFilename);
-    switchTab('send');
-    switchSendMode('file');
+    switchTab('send'); switchSendMode('file');
     await handleFile(file);
   }
 });
 
-// ===== Receive: New Transfer =====
 const btnReceiveNew = $<HTMLButtonElement>('btn-receive-new');
 btnReceiveNew.addEventListener('click', () => {
   if (receiver) receiver.reset();
-  // Reset UI
   recvInfo.classList.add('hidden');
   receiveComplete.classList.add('hidden');
   textResult.classList.add('hidden');
   chunkGrid.innerHTML = '';
-  recvCurrent.textContent = '0';
-  recvTotal.textContent = '0';
-  recvProgress.style.width = '0%';
-  recvFilename.textContent = '-';
-  recvFilesize.textContent = '-';
-  // Show camera and controls again
+  recvCurrent.textContent = '0'; recvTotal.textContent = '0'; recvProgress.style.width = '0%';
+  recvFilename.textContent = '-'; recvFilesize.textContent = '-';
   const cameraWrapper = receiveActive.querySelector('.camera-wrapper') as HTMLElement;
   if (cameraWrapper) cameraWrapper.classList.remove('hidden');
   const recvControls = receiveActive.querySelector('.receive-controls') as HTMLElement;
   if (recvControls) recvControls.classList.remove('hidden');
-  // Restart scanning
   btnStartScan.click();
 });
 
@@ -586,69 +520,20 @@ btnDownload.addEventListener('click', () => {
   if (!downloadBlob) return;
   const url = URL.createObjectURL(downloadBlob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = downloadFilename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  a.href = url; a.download = downloadFilename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 });
 
-function initSendChunkGrid(total: number) {
-  sendChunkGrid.classList.remove('hidden');
-  sendChunkGrid.innerHTML = '';
-  for (let i = 0; i < total; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'chunk-cell';
-    cell.title = `Chunk ${i}`;
-    sendChunkGrid.appendChild(cell);
-  }
-}
+// ===== Camera Flip =====
+const btnFlipCam = $<HTMLButtonElement>('btn-flip-cam');
+btnFlipCam.addEventListener('click', () => { if (receiver) receiver.flipCamera(); });
 
-function highlightSendingChunk(current: number, total: number) {
-  if (sendChunkGrid.children.length !== total) return;
-  const prev = sendChunkGrid.querySelector('.sending');
-  if (prev) prev.classList.remove('sending');
-  const cell = sendChunkGrid.children[current] as HTMLElement;
-  if (cell && !cell.classList.contains('received')) {
-    cell.classList.add('sending');
-  }
-}
-
-function updateSendChunkGrid(total: number, received: Set<number>) {
-  sendChunkGrid.classList.remove('hidden');
-  if (sendChunkGrid.children.length !== total) {
-    sendChunkGrid.innerHTML = '';
-    for (let i = 0; i < total; i++) {
-      const cell = document.createElement('div');
-      cell.className = 'chunk-cell';
-      cell.title = `Chunk ${i}`;
-      sendChunkGrid.appendChild(cell);
-    }
-  }
-  const cells = sendChunkGrid.children;
-  for (let i = 0; i < total; i++) {
-    const cell = cells[i] as HTMLElement;
-    if (received.has(i) && !cell.classList.contains('received')) {
-      cell.classList.add('received', 'just-received');
-      setTimeout(() => cell.classList.remove('just-received'), 400);
-    }
-  }
-}
-
+// ===== Error Toast =====
 function showError(message: string) {
   const toast = document.createElement('div');
   toast.className = 'error-toast';
   toast.textContent = message;
   document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.remove();
-  }, 5000);
+  setTimeout(() => { toast.remove(); }, 5000);
 }
-
-// ===== Camera Flip (Receive) =====
-const btnFlipCam = $<HTMLButtonElement>('btn-flip-cam');
-btnFlipCam.addEventListener('click', () => {
-  if (receiver) receiver.flipCamera();
-});
-

@@ -118,24 +118,6 @@
               </div>
             </div>
 
-            <label class="toggle-row" id="send-audio-toggle">
-              <span class="toggle-label">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                Audio Feedback
-              </span>
-              <input type="checkbox" id="send-audio-enabled" />
-              <span class="toggle-switch"></span>
-            </label>
-
-            <div id="audio-feedback-indicator" class="audio-indicator hidden">
-              <div class="audio-indicator-icon" id="audio-indicator-icon">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-              </div>
-              <span id="audio-indicator-text">Listening...</span>
-              <span id="audio-indicator-detail" class="audio-indicator-detail"></span>
-              <div id="audio-debug" class="audio-debug"></div>
-            </div>
-
             <div class="qr-area">
               <canvas id="qr-canvas"></canvas>
               <div class="qr-overlay" id="qr-overlay">
@@ -167,6 +149,24 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
               </button>
             </div>
+
+            <button id="btn-scan-feedback" class="btn btn-secondary" style="margin-top:12px;width:100%">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Scan Feedback QR
+            </button>
+
+            <div id="feedback-scanner" class="feedback-scanner hidden">
+              <div class="feedback-scanner-header">
+                <span>Scanning for feedback QR...</span>
+                <button id="btn-cancel-scan" class="btn btn-ghost">Cancel</button>
+              </div>
+              <div class="feedback-camera-wrap">
+                <video id="feedback-camera" autoplay playsinline muted></video>
+                <canvas id="feedback-scan-canvas"></canvas>
+              </div>
+            </div>
+
+            <div id="feedback-result" class="feedback-result hidden"></div>
           </div>
         </div>
 
@@ -180,14 +180,6 @@
               </svg>
               <p>Point your camera at the sender's QR codes to receive a file.</p>
             </div>
-            <label class="toggle-row" id="recv-audio-toggle">
-              <span class="toggle-label">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                Audio Feedback (play tones for sender)
-              </span>
-              <input type="checkbox" id="recv-audio-enabled" />
-              <span class="toggle-switch"></span>
-            </label>
             <button id="btn-start-scan" class="btn btn-primary btn-large">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -271,6 +263,11 @@
               </div>
             </div>
 
+            <button id="btn-show-feedback" class="btn btn-secondary hidden" style="margin-top:12px;width:100%">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              Show Feedback QR
+            </button>
+
             <div class="receive-controls">
               <button id="btn-stop-scan" class="btn btn-secondary">Stop Camera</button>
               <button id="btn-reset-scan" class="btn btn-ghost">Reset</button>
@@ -278,10 +275,21 @@
           </div>
         </div>
 
+        <!-- Feedback QR Overlay (full screen) -->
+        <div id="feedback-qr-overlay" class="feedback-qr-overlay hidden">
+          <div class="feedback-qr-content">
+            <h2>Feedback QR</h2>
+            <p>Show this to the sender's camera</p>
+            <canvas id="feedback-qr-canvas"></canvas>
+            <p id="feedback-qr-info"></p>
+            <button id="btn-dismiss-feedback" class="btn btn-primary btn-large">Done</button>
+          </div>
+        </div>
+
         <footer>
           <p>&copy; Aionda GmbH &mdash; <a href="https://aionda.com/impressum/" target="_blank" rel="noopener" class="footer-link">Imprint</a></p>
           <p>No server, no cloud, no tracking. 100% offline.</p>
-          <p>v4.1.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
+          <p>v5.0.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
         </footer>
       </div>
     </div>

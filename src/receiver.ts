@@ -1,6 +1,7 @@
 import jsQR from 'jsqr';
+import QRCode from 'qrcode';
 import { parsePacket, assembleChunks, ChunkPacket, TransferMetadata } from './protocol';
-import { AudioEncoder, CalibrationTonePlayer, FREQ_ZERO, FREQ_ONE } from './audio-modem';
+import { createFeedbackPacket, serializeFeedback } from './feedback';
 
 export interface ReceiverCallbacks {
   onChunkReceived: (index: number, total: number, received: number) => void;
@@ -20,11 +21,6 @@ export class Receiver {
   private stream: MediaStream | null = null;
   private lastScannedIndex = -1;
   private facing: 'environment' | 'user' = 'environment';
-
-  // Audio feedback (optional)
-  private encoder: AudioEncoder | null = null;
-  private feedbackDirty = false;
-  private feedbackThrottleId: number | null = null;
 
   constructor(
     video: HTMLVideoElement,
@@ -77,39 +73,7 @@ export class Receiver {
     this.animFrameId = requestAnimationFrame(() => this.scanLoop());
   }
 
-  private calPlayer: CalibrationTonePlayer | null = null;
-  private calPlaying = false;
-
-  private async playCalPattern(freq: number): Promise<void> {
-    if (this.calPlaying) return;
-    this.calPlaying = true;
-    const p = this.calPlayer!;
-    // Loop: 3 beeps with pauses, repeat until next command
-    while (this.calPlaying) {
-      await p.playTone(freq, 500);
-      if (!this.calPlaying) break;
-      await new Promise(r => setTimeout(r, 500));
-      if (!this.calPlaying) break;
-      await p.playTone(freq, 500);
-      if (!this.calPlaying) break;
-      await new Promise(r => setTimeout(r, 500));
-      if (!this.calPlaying) break;
-      await p.playTone(freq, 500);
-      if (!this.calPlaying) break;
-      await new Promise(r => setTimeout(r, 1500)); // longer gap before repeat
-    }
-  }
-
   private handleQRData(raw: string): void {
-    // Check for calibration commands first
-    try {
-      const obj = JSON.parse(raw);
-      if (obj && obj.cal) {
-        this.handleCalibration(obj.cal);
-        return;
-      }
-    } catch { /* not JSON or no cal field — normal QR data */ }
-
     const packet = parsePacket(raw);
     if (!packet) return;
     if (this.chunks.has(packet.i)) return;
@@ -117,7 +81,6 @@ export class Receiver {
     this.chunks.set(packet.i, packet);
     this.totalChunks = packet.t;
     this.lastScannedIndex = packet.i;
-    this.feedbackDirty = true;
 
     this.callbacks.onChunkReceived(packet.i, packet.t, this.chunks.size);
 
@@ -132,59 +95,16 @@ export class Receiver {
     }
   }
 
-  // ===== Calibration =====
-  private async handleCalibration(command: string): Promise<void> {
-    if (!this.calPlayer) this.calPlayer = new CalibrationTonePlayer();
-    if (command === 'low') {
-      this.calPlaying = false; // stop any previous pattern
-      await new Promise(r => setTimeout(r, 100));
-      this.playCalPattern(FREQ_ZERO);
-    } else if (command === 'high') {
-      this.calPlaying = false;
-      await new Promise(r => setTimeout(r, 100));
-      this.playCalPattern(FREQ_ONE);
-    } else if (command === 'done') {
-      this.calPlaying = false;
-      if (this.calPlayer) this.calPlayer.stop();
-      this.calPlayer = null;
-      // Start modem after calibration
-      if (!this.encoder) this.startModemFeedback();
-    }
-  }
-
-  // ===== Audio Feedback =====
-  private audioEnabled = false;
-
-  startAudioFeedback(): void {
-    // Don't play modem tones yet — wait for calibration QR commands first
-    // The modem starts when {"cal":"done"} is received
-    this.audioEnabled = true;
-  }
-
-  private startModemFeedback(): void {
-    this.encoder = new AudioEncoder();
-    this.encoder.start(this.receivedChunks, Math.max(this.totalChunks, 1));
-    this.feedbackThrottleId = window.setInterval(() => {
-      if (this.feedbackDirty && this.encoder) {
-        this.feedbackDirty = false;
-        this.encoder.update(this.receivedChunks, Math.max(this.totalChunks, 1));
-      }
-    }, 200);
-  }
-
-  stopAudioFeedback(): void {
-    if (this.feedbackThrottleId !== null) {
-      clearInterval(this.feedbackThrottleId);
-      this.feedbackThrottleId = null;
-    }
-    if (this.encoder) {
-      this.encoder.stop();
-      this.encoder = null;
-    }
-  }
-
-  get isAudioFeedbackActive(): boolean {
-    return this.audioEnabled;
+  // ===== Feedback QR =====
+  async renderFeedbackQR(targetCanvas: HTMLCanvasElement): Promise<void> {
+    const packet = createFeedbackPacket(this.receivedChunks, this.totalChunks);
+    const data = serializeFeedback(packet);
+    await QRCode.toCanvas(targetCanvas, data, {
+      width: 300,
+      margin: 2,
+      errorCorrectionLevel: 'L', // maximize data capacity
+      color: { dark: '#000000', light: '#ffffff' },
+    });
   }
 
   async flipCamera(): Promise<void> {
@@ -209,7 +129,6 @@ export class Receiver {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
-    this.stopAudioFeedback();
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
@@ -237,6 +156,5 @@ export class Receiver {
     this.chunks.clear();
     this.totalChunks = 0;
     this.lastScannedIndex = -1;
-    this.feedbackDirty = false;
   }
 }
