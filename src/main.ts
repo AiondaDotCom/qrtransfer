@@ -483,6 +483,12 @@ function showComplete(data: Uint8Array, metadata: TransferMetadata) {
     btnDownload.classList.remove('hidden');
     downloadBlob = new Blob([data as unknown as BlobPart]);
     downloadFilename = metadata.filename;
+
+    // Show image preview for image files
+    const ext = metadata.filename.toLowerCase().split('.').pop() || '';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+      showImagePreview(downloadBlob, metadata.filename);
+    }
   }
 }
 
@@ -540,6 +546,32 @@ btnDownload.addEventListener('click', () => {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 });
+
+// ===== Image Preview =====
+function showImagePreview(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const overlay = document.createElement('div');
+  overlay.className = 'image-preview-overlay';
+  overlay.innerHTML = `
+    <div class="image-preview-content">
+      <button class="image-preview-close">&times;</button>
+      <img src="${url}" alt="${filename}" />
+      <div class="image-preview-footer">
+        <span>${filename}</span>
+        <a href="${url}" download="${filename}" class="btn btn-primary">Download</a>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.image-preview-close')!.addEventListener('click', () => {
+    overlay.remove();
+    URL.revokeObjectURL(url);
+  });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) { overlay.remove(); URL.revokeObjectURL(url); }
+  });
+}
 
 // ===== Camera Flip =====
 const btnFlipCam = $<HTMLButtonElement>('btn-flip-cam');
