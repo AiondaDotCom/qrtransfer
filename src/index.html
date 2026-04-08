@@ -152,12 +152,16 @@
 
             <button id="btn-scan-feedback" class="btn btn-secondary" style="margin-top:12px;width:100%">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              Scan Feedback QR
+              Scan Sync QR
             </button>
 
             <div id="feedback-scanner" class="feedback-scanner hidden">
               <div class="feedback-scanner-header">
-                <span>Scanning for feedback QR...</span>
+                <span>Scanning for sync QR...</span>
+                <button id="btn-flip-feedback-cam" class="btn btn-ghost">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16v4a2 2 0 0 1-2 2h-4"/><polyline points="14 22 20 22 20 16"/><path d="M4 8V4a2 2 0 0 1 2-2h4"/><polyline points="10 2 4 2 4 8"/><path d="M21 12A9 9 0 0 0 6 5.3"/><path d="M3 12a9 9 0 0 0 15 6.7"/></svg>
+                  Flip
+                </button>
                 <button id="btn-cancel-scan" class="btn btn-ghost">Cancel</button>
               </div>
               <div class="feedback-camera-wrap">
@@ -265,7 +269,7 @@
 
             <button id="btn-show-feedback" class="btn btn-secondary hidden" style="margin-top:12px;width:100%">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-              Show Feedback QR
+              Show Sync QR
             </button>
 
             <div class="receive-controls">
@@ -275,10 +279,10 @@
           </div>
         </div>
 
-        <!-- Feedback QR Overlay (full screen) -->
+        <!-- Sync QR Overlay (full screen) -->
         <div id="feedback-qr-overlay" class="feedback-qr-overlay hidden">
           <div class="feedback-qr-content">
-            <h2>Feedback QR</h2>
+            <h2>Sync QR</h2>
             <p>Show this to the sender's camera</p>
             <canvas id="feedback-qr-canvas"></canvas>
             <p id="feedback-qr-info"></p>
@@ -289,7 +293,7 @@
         <footer>
           <p>&copy; Aionda GmbH &mdash; <a href="https://aionda.com/impressum/" target="_blank" rel="noopener" class="footer-link">Imprint</a></p>
           <p>No server, no cloud, no tracking. 100% offline.</p>
-          <p>v5.0.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
+          <p>v5.0.1 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
         </footer>
       </div>
     </div>

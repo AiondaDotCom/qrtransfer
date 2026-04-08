@@ -49,6 +49,7 @@ const playLabel = $('play-label');
 const btnScanFeedback = $<HTMLButtonElement>('btn-scan-feedback');
 const feedbackScanner = $('feedback-scanner');
 const feedbackCamera = $<HTMLVideoElement>('feedback-camera');
+const btnFlipFeedbackCam = $<HTMLButtonElement>('btn-flip-feedback-cam');
 const feedbackScanCanvas = $<HTMLCanvasElement>('feedback-scan-canvas');
 const btnCancelScan = $<HTMLButtonElement>('btn-cancel-scan');
 const feedbackResult = $('feedback-result');
@@ -252,6 +253,7 @@ speedSlider.addEventListener('input', () => {
 // ===== Send: Scan Feedback QR =====
 let feedbackStream: MediaStream | null = null;
 let scanningFeedback = false;
+let feedbackFacing: 'environment' | 'user' = 'environment';
 
 btnScanFeedback.addEventListener('click', async () => {
   if (!sender) return;
@@ -262,7 +264,9 @@ btnScanFeedback.addEventListener('click', async () => {
   feedbackScanner.classList.remove('hidden');
 
   try {
-    feedbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    feedbackStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: feedbackFacing },
+    });
     feedbackCamera.srcObject = feedbackStream;
     await feedbackCamera.play();
   } catch {
@@ -309,6 +313,18 @@ function stopFeedbackScan() {
 btnCancelScan.addEventListener('click', () => {
   stopFeedbackScan();
   if (sender && !sender.isPlaying) { sender.play(); updatePlayButton(); }
+});
+
+btnFlipFeedbackCam.addEventListener('click', async () => {
+  feedbackFacing = feedbackFacing === 'environment' ? 'user' : 'environment';
+  if (feedbackStream) {
+    feedbackStream.getTracks().forEach(t => t.stop());
+    feedbackStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: feedbackFacing },
+    });
+    feedbackCamera.srcObject = feedbackStream;
+    await feedbackCamera.play();
+  }
 });
 
 // ===== Send: Chunk Grid =====
