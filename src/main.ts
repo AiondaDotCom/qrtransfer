@@ -5,6 +5,13 @@ import { formatFileSize, TransferMetadata } from './protocol';
 import jsQR from 'jsqr';
 import { parseFeedback, getMissingChunks } from './feedback';
 
+// ===== PWA: Service Worker Registration =====
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    // SW registration failed — app still works without it
+  });
+}
+
 // ===== DOM Elements =====
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
