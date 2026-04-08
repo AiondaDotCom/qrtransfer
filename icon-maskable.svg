@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Maskable icon: safe zone is inner 80% (circle r=204.8 from center) -->
+  <rect width="512" height="512" fill="#0a0a0f"/>
+  <g transform="translate(96, 96) scale(8)">
+    <rect x="2" y="2" width="14" height="14" rx="2" stroke="#a78bfa" stroke-width="2.5" fill="none"/>
+    <rect x="5" y="5" width="8" height="8" rx="1" fill="#a78bfa"/>
+    <rect x="24" y="2" width="14" height="14" rx="2" stroke="#a78bfa" stroke-width="2.5" fill="none"/>
+    <rect x="27" y="5" width="8" height="8" rx="1" fill="#a78bfa"/>
+    <rect x="2" y="24" width="14" height="14" rx="2" stroke="#a78bfa" stroke-width="2.5" fill="none"/>
+    <rect x="5" y="27" width="8" height="8" rx="1" fill="#a78bfa"/>
+    <rect x="24" y="24" width="4" height="4" fill="#a78bfa"/>
+    <rect x="30" y="24" width="4" height="4" fill="#a78bfa"/>
+    <rect x="36" y="24" width="4" height="4" fill="#a78bfa"/>
+    <rect x="24" y="30" width="4" height="4" fill="#a78bfa"/>
+    <rect x="36" y="30" width="4" height="4" fill="#a78bfa"/>
+    <rect x="24" y="36" width="4" height="4" fill="#a78bfa"/>
+    <rect x="30" y="36" width="4" height="4" fill="#a78bfa"/>
+    <rect x="36" y="36" width="4" height="4" fill="#a78bfa"/>
+  </g>
+</svg>
