@@ -314,6 +314,7 @@ function initSendChunkGrid(total: number) {
     cell.title = `Chunk ${i}`;
     sendChunkGrid.appendChild(cell);
   }
+  showGridHint();
 }
 
 function highlightSendingChunk(current: number, total: number) {
@@ -346,7 +347,14 @@ function updateSendChunkGrid(total: number, received: Set<number>) {
 
 // ===== Send: Chunk Grid Interaction =====
 let gridDragging = false;
+let ghostSweepDone = false;
 const gridSelected = new Set<number>();
+
+// Drag counter tooltip
+const dragCounter = document.createElement('div');
+dragCounter.className = 'chunk-drag-counter';
+dragCounter.style.display = 'none';
+document.body.appendChild(dragCounter);
 
 function getCellIndex(el: Element | null): number {
   if (!el || !el.classList.contains('chunk-cell')) return -1;
@@ -373,8 +381,30 @@ function selectCell(idx: number) {
   }
 }
 
+function updateDragCounter(x: number, y: number) {
+  if (gridSelected.size < 2) {
+    dragCounter.style.display = 'none';
+    return;
+  }
+  const indices = Array.from(gridSelected).sort((a, b) => a - b);
+  dragCounter.textContent = `Chunk ${indices[0]}–${indices[indices.length - 1]}`;
+  dragCounter.style.display = 'block';
+  dragCounter.style.left = `${x}px`;
+  dragCounter.style.top = `${y}px`;
+}
+
+function hideDragCounter() {
+  dragCounter.style.display = 'none';
+}
+
+function dismissHint() {
+  const hint = document.getElementById('chunk-grid-hint');
+  if (hint) hint.classList.add('hidden');
+}
+
 function applyGridSelection() {
   if (!sender) return;
+  dismissHint();
   qrOverlay.classList.add('hidden');
   const indices = Array.from(gridSelected).sort((a, b) => a - b);
   if (indices.length === 1) {
@@ -383,6 +413,54 @@ function applyGridSelection() {
     sender.playSelection(indices);
   }
   btnResumeAll.classList.remove('hidden');
+}
+
+// Ghost sweep animation with finger cursor — starts from chunk 0 (top-left)
+function startGhostSweep() {
+  if (ghostSweepDone) return;
+  ghostSweepDone = true;
+  const cells = sendChunkGrid.children;
+  const total = cells.length;
+  if (total < 3) return;
+
+  const finger = document.createElement('div');
+  finger.textContent = '👆';
+  finger.style.cssText = 'position:fixed;font-size:22px;pointer-events:none;z-index:100;transition:left 200ms ease,top 200ms ease;opacity:0.9;';
+  document.body.appendChild(finger);
+
+  const sweepLen = Math.min(12, total);
+  let step = 0;
+
+  function sweepStep() {
+    if (step > 0) {
+      (cells[step - 1] as HTMLElement).classList.remove('ghost-sweep');
+    }
+    if (step >= sweepLen) {
+      finger.remove();
+      return;
+    }
+    const cell = cells[step] as HTMLElement;
+    cell.classList.add('ghost-sweep');
+    const rect = cell.getBoundingClientRect();
+    finger.style.left = `${rect.left + rect.width / 2 - 11}px`;
+    finger.style.top = `${rect.bottom + 4}px`;
+    step++;
+    setTimeout(sweepStep, 250);
+  }
+
+  // Position finger on first cell before starting
+  const first = cells[0] as HTMLElement;
+  const r = first.getBoundingClientRect();
+  finger.style.left = `${r.left + r.width / 2 - 11}px`;
+  finger.style.top = `${r.bottom + 4}px`;
+  setTimeout(sweepStep, 300);
+}
+
+function showGridHint() {
+  if (ghostSweepDone) return;
+  const hint = document.getElementById('chunk-grid-hint');
+  if (hint) hint.classList.remove('hidden');
+  setTimeout(() => { if (!ghostSweepDone) startGhostSweep(); }, 2000);
 }
 
 // Mouse events
@@ -399,12 +477,21 @@ sendChunkGrid.addEventListener('mousedown', (e) => {
 sendChunkGrid.addEventListener('mouseover', (e) => {
   if (!gridDragging) return;
   const idx = getCellIndex(e.target as Element);
-  if (idx >= 0 && !gridSelected.has(idx)) selectCell(idx);
+  if (idx >= 0 && !gridSelected.has(idx)) {
+    selectCell(idx);
+    updateDragCounter(e.clientX, e.clientY);
+  }
+});
+
+sendChunkGrid.addEventListener('mousemove', (e) => {
+  if (!gridDragging) return;
+  updateDragCounter(e.clientX, e.clientY);
 });
 
 document.addEventListener('mouseup', () => {
   if (!gridDragging) return;
   gridDragging = false;
+  hideDragCounter();
   if (gridSelected.size > 0) applyGridSelection();
 });
 
@@ -428,11 +515,13 @@ sendChunkGrid.addEventListener('touchmove', (e) => {
   const el = document.elementFromPoint(touch.clientX, touch.clientY);
   const idx = getCellIndex(el);
   if (idx >= 0 && !gridSelected.has(idx)) selectCell(idx);
+  updateDragCounter(touch.clientX, touch.clientY);
 }, { passive: false });
 
 document.addEventListener('touchend', () => {
   if (!gridDragging) return;
   gridDragging = false;
+  hideDragCounter();
   if (gridSelected.size > 0) applyGridSelection();
 });
 
