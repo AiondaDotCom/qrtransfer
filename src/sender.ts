@@ -120,6 +120,40 @@ export class Sender {
     this.renderCurrent();
   }
 
+  async showChunk(index: number): Promise<void> {
+    if (index < 0 || index >= this.packets.length) return;
+    this.pause();
+    this.currentIndex = index;
+    this.playlist = null;
+    this.playlistIndex = 0;
+    const packet = this.packets[index];
+    const data = serializePacket(packet);
+    await QRCode.toCanvas(this.canvas, data, {
+      width: 380,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+    this.callbacks.onProgress(index, this.packets.length);
+  }
+
+  playSelection(indices: number[]): void {
+    if (indices.length === 0) return;
+    this.pause();
+    this.playlist = indices;
+    this.playlistIndex = 0;
+    this.play();
+  }
+
+  resetPlaylist(): void {
+    // Continue from the chunk that was last shown
+    if (this.playlist && this.playlist.length > 0) {
+      this.currentIndex = this.playlist[this.playlistIndex % this.playlist.length];
+    }
+    this.playlist = null;
+    this.playlistIndex = 0;
+  }
+
   setSpeed(ms: number): void {
     this.speed = ms;
     if (this.playing) {

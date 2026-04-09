@@ -44,13 +44,8 @@ const sendChunkGrid = $('send-chunk-grid');
 const qrOverlay = $('qr-overlay');
 const sendCurrent = $('send-current');
 const sendTotal = $('send-total');
-const sendProgress = $('send-progress');
-const btnPrev = $<HTMLButtonElement>('btn-prev');
-const btnPlay = $<HTMLButtonElement>('btn-play');
-const btnNext = $<HTMLButtonElement>('btn-next');
-const iconPlay = $('icon-play');
-const iconPause = $('icon-pause');
-const playLabel = $('play-label');
+const btnPlayOverlay = $<HTMLButtonElement>('btn-play-overlay');
+const btnResumeAll = $<HTMLButtonElement>('btn-resume-all');
 
 // Feedback scanner (sender)
 const btnScanFeedback = $<HTMLButtonElement>('btn-scan-feedback');
@@ -153,11 +148,6 @@ async function handleText(text: string) {
   await sender.loadText(text, chunkSize);
   textInputZone.classList.add('hidden');
   sendActive.classList.remove('hidden');
-  if (sender.totalPackets > 1) {
-    qrOverlay.classList.add('hidden');
-    sender.play();
-    updatePlayButton();
-  }
 }
 
 // ===== Send: File Selection =====
@@ -179,15 +169,12 @@ function createSenderCallbacks() {
       sendActive.classList.remove('hidden');
       sendTotal.textContent = String(total);
       sendCurrent.textContent = '1';
-      sendProgress.style.width = `${(1 / total) * 100}%`;
       qrOverlay.classList.remove('hidden');
-      updatePlayButton();
       initSendChunkGrid(total);
     },
     onProgress: (current: number, total: number) => {
       sendCurrent.textContent = String(current + 1);
       sendTotal.textContent = String(total);
-      sendProgress.style.width = `${((current + 1) / total) * 100}%`;
       highlightSendingChunk(current, total);
     },
     onFeedbackReceived: (receivedCount: number, total: number, receivedSet: Set<number>) => {
@@ -220,27 +207,11 @@ async function handleFile(file: File) {
 }
 
 // ===== Send: Controls =====
-btnPlay.addEventListener('click', async () => {
+btnPlayOverlay.addEventListener('click', () => {
   if (!sender) return;
-  if (sender.isPlaying) {
-    sender.pause();
-  } else {
-    qrOverlay.classList.add('hidden');
-    sender.play();
-  }
-  updatePlayButton();
+  qrOverlay.classList.add('hidden');
+  sender.play();
 });
-
-btnPrev.addEventListener('click', () => { if (sender) { qrOverlay.classList.add('hidden'); sender.prev(); } });
-btnNext.addEventListener('click', () => { if (sender) { qrOverlay.classList.add('hidden'); sender.next(); } });
-
-function updatePlayButton() {
-  if (!sender) return;
-  const playing = sender.isPlaying;
-  iconPlay.classList.toggle('hidden', playing);
-  iconPause.classList.toggle('hidden', !playing);
-  playLabel.textContent = playing ? 'Pause' : 'Play';
-}
 
 chunkSizeSlider.addEventListener('input', () => { chunkSizeVal.textContent = `${chunkSizeSlider.value} B`; });
 chunkSizeSlider.addEventListener('change', async () => {
@@ -278,8 +249,7 @@ btnScanFeedback.addEventListener('click', async () => {
     await feedbackCamera.play();
   } catch {
     stopFeedbackScan();
-    if (wasPlaying) sender.play();
-    updatePlayButton();
+    if (wasPlaying) { sender.play(); qrOverlay.classList.add('hidden'); }
     return;
   }
 
@@ -298,7 +268,7 @@ btnScanFeedback.addEventListener('click', async () => {
           stopFeedbackScan();
           sender!.applyFeedback(packet);
           if (wasPlaying) sender!.play();
-          updatePlayButton();
+    
           return;
         }
       }
@@ -319,7 +289,7 @@ function stopFeedbackScan() {
 
 btnCancelScan.addEventListener('click', () => {
   stopFeedbackScan();
-  if (sender && !sender.isPlaying) { sender.play(); updatePlayButton(); }
+  if (sender && !sender.isPlaying) { sender.play(); qrOverlay.classList.add('hidden'); }
 });
 
 btnFlipFeedbackCam.addEventListener('click', async () => {
@@ -373,6 +343,108 @@ function updateSendChunkGrid(total: number, received: Set<number>) {
     }
   }
 }
+
+// ===== Send: Chunk Grid Interaction =====
+let gridDragging = false;
+const gridSelected = new Set<number>();
+
+function getCellIndex(el: Element | null): number {
+  if (!el || !el.classList.contains('chunk-cell')) return -1;
+  return Array.prototype.indexOf.call(sendChunkGrid.children, el);
+}
+
+function clearGridSelection() {
+  gridSelected.clear();
+  for (const cell of sendChunkGrid.children) {
+    (cell as HTMLElement).classList.remove('selected');
+  }
+}
+
+function selectCell(idx: number) {
+  if (idx < 0) return;
+  const cell = sendChunkGrid.children[idx] as HTMLElement;
+  if (!cell) return;
+  if (gridSelected.has(idx)) {
+    gridSelected.delete(idx);
+    cell.classList.remove('selected');
+  } else {
+    gridSelected.add(idx);
+    cell.classList.add('selected');
+  }
+}
+
+function applyGridSelection() {
+  if (!sender) return;
+  qrOverlay.classList.add('hidden');
+  const indices = Array.from(gridSelected).sort((a, b) => a - b);
+  if (indices.length === 1) {
+    sender.showChunk(indices[0]);
+  } else if (indices.length > 1) {
+    sender.playSelection(indices);
+  }
+  btnResumeAll.classList.remove('hidden');
+}
+
+// Mouse events
+sendChunkGrid.addEventListener('mousedown', (e) => {
+  const idx = getCellIndex(e.target as Element);
+  if (idx < 0) return;
+  e.preventDefault();
+  if (sender?.isPlaying) sender.pause();
+  clearGridSelection();
+  gridDragging = true;
+  selectCell(idx);
+});
+
+sendChunkGrid.addEventListener('mouseover', (e) => {
+  if (!gridDragging) return;
+  const idx = getCellIndex(e.target as Element);
+  if (idx >= 0 && !gridSelected.has(idx)) selectCell(idx);
+});
+
+document.addEventListener('mouseup', () => {
+  if (!gridDragging) return;
+  gridDragging = false;
+  if (gridSelected.size > 0) applyGridSelection();
+});
+
+// Touch events
+sendChunkGrid.addEventListener('touchstart', (e) => {
+  const touch = e.touches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const idx = getCellIndex(el);
+  if (idx < 0) return;
+  e.preventDefault();
+  if (sender?.isPlaying) sender.pause();
+  clearGridSelection();
+  gridDragging = true;
+  selectCell(idx);
+}, { passive: false });
+
+sendChunkGrid.addEventListener('touchmove', (e) => {
+  if (!gridDragging) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const idx = getCellIndex(el);
+  if (idx >= 0 && !gridSelected.has(idx)) selectCell(idx);
+}, { passive: false });
+
+document.addEventListener('touchend', () => {
+  if (!gridDragging) return;
+  gridDragging = false;
+  if (gridSelected.size > 0) applyGridSelection();
+});
+
+// Resume All button
+btnResumeAll.addEventListener('click', () => {
+  if (!sender) return;
+  clearGridSelection();
+  sender.resetPlaylist();
+  sender.play();
+  qrOverlay.classList.add('hidden');
+  btnResumeAll.classList.add('hidden');
+});
 
 // ===== Receive: Camera =====
 let scanFlashTimeout: number | null = null;
