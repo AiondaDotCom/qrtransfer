@@ -1,4 +1,4 @@
-const CACHE_NAME = 'qrtransfer-v5.1.0';
+const CACHE_NAME = 'qrtransfer-v5.3.0';
 const ASSETS = [
   '/',
   '/index.html',
