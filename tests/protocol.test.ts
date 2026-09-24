@@ -8,6 +8,8 @@ import {
   decompress,
   createChunks,
   createTextChunks,
+  createFragmentChunks,
+  parseFragments,
   serializePacket,
   parsePacket,
   assembleChunks,
@@ -404,6 +406,28 @@ describe('end-to-end', () => {
       expect(decoded).toBe(text);
       expect(result.metadata.type).toBe('text');
     }
+  });
+
+  it('round-trips text fragments via createFragmentChunks', () => {
+    const fragments = ['admin', 'p@ss "w0rd"\nzeile2', 'https://example.com/login', 'Ümläut 🔑'];
+    const chunks = createFragmentChunks(fragments, 300);
+
+    expect(chunks.length).toBe(1);
+    expect(chunks[0].tp).toBe('f');
+    expect(chunks[0].n).toBe('fragments.json');
+
+    const result = assembleChunks(new Map(chunks.map((c) => [c.i, c])));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.metadata.type).toBe('fragments');
+      expect(parseFragments(result.data)).toEqual(fragments);
+    }
+  });
+
+  it('parseFragments rejects non-string-array payloads', () => {
+    const enc = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
+    expect(() => parseFragments(enc({ a: 1 }))).toThrow();
+    expect(() => parseFragments(enc(['ok', 42]))).toThrow();
   });
 
   it('round-trips longer text with multiple chunks', () => {

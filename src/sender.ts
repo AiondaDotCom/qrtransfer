@@ -1,5 +1,5 @@
 import QRCode from 'qrcode';
-import { createChunks, createTextChunks, serializePacket, ChunkPacket } from './protocol';
+import { createChunks, createTextChunks, createFragmentChunks, serializePacket, ChunkPacket } from './protocol';
 import { FeedbackPacket, getMissingChunks } from './feedback';
 
 export interface SenderCallbacks {
@@ -42,6 +42,16 @@ export class Sender {
 
   async loadText(text: string, chunkSize: number = 900): Promise<void> {
     this.packets = createTextChunks(text, chunkSize);
+    this.currentIndex = 0;
+    this.playlist = null;
+    this.playlistIndex = 0;
+    this.completed = false;
+    this.callbacks.onReady(this.packets.length);
+    await this.renderCurrent();
+  }
+
+  async loadFragments(fragments: string[], chunkSize: number = 900): Promise<void> {
+    this.packets = createFragmentChunks(fragments, chunkSize);
     this.currentIndex = 0;
     this.playlist = null;
     this.playlistIndex = 0;

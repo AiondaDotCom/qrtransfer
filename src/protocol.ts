@@ -7,7 +7,7 @@ export interface ChunkPacket {
   n?: string;
   s?: number;
   h?: string;
-  tp?: string; // "t" = text, absent = file
+  tp?: string; // "t" = text, "f" = text fragments (JSON string array), absent = file
   d: string;
 }
 
@@ -16,7 +16,7 @@ export interface TransferMetadata {
   fileSize: number;
   hash: string;
   totalChunks: number;
-  type: 'text' | 'file';
+  type: 'text' | 'fragments' | 'file';
 }
 
 // CRC32 lookup table
@@ -175,7 +175,7 @@ export function assembleChunks(packets: Map<number, ChunkPacket>): AssemblyResul
       fileSize: chunk0.s,
       hash: chunk0.h,
       totalChunks,
-      type: chunk0.tp === 't' ? 'text' : 'file',
+      type: chunk0.tp === 't' ? 'text' : chunk0.tp === 'f' ? 'fragments' : 'file',
     },
   };
 }
@@ -184,7 +184,36 @@ export function createTextChunks(
   text: string,
   chunkSize: number = 900
 ): ChunkPacket[] {
-  const data = new TextEncoder().encode(text);
+  return createTypedChunks(new TextEncoder().encode(text), 't', 'text', chunkSize);
+}
+
+/**
+ * Multiple independent text fragments (e.g. user / password / url), each shown
+ * with its own copy button on the receiver. Payload is a JSON string array.
+ * Older receivers without fragment support treat it as a file "fragments.json".
+ */
+export function createFragmentChunks(
+  fragments: string[],
+  chunkSize: number = 900
+): ChunkPacket[] {
+  const data = new TextEncoder().encode(JSON.stringify(fragments));
+  return createTypedChunks(data, 'f', 'fragments.json', chunkSize);
+}
+
+export function parseFragments(data: Uint8Array): string[] {
+  const parsed = JSON.parse(new TextDecoder().decode(data));
+  if (!Array.isArray(parsed) || !parsed.every((f) => typeof f === 'string')) {
+    throw new Error('Invalid fragment payload');
+  }
+  return parsed;
+}
+
+function createTypedChunks(
+  data: Uint8Array,
+  tp: string,
+  name: string,
+  chunkSize: number
+): ChunkPacket[] {
   const compressed = compress(data);
   const b64 = toBase64(compressed);
   const hash = crc32Hex(data);
@@ -201,8 +230,8 @@ export function createTextChunks(
       d: chunk,
     };
     if (i === 0) {
-      packet.tp = 't';
-      packet.n = 'text';
+      packet.tp = tp;
+      packet.n = name;
       packet.s = data.length;
       packet.h = hash;
     }

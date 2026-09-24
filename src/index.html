@@ -87,7 +87,11 @@
           </div>
 
           <div id="text-input-zone" class="text-input-zone hidden">
-            <textarea id="text-input" placeholder="Paste text, links, or notes here..." rows="6"></textarea>
+            <div id="fragment-list" class="fragment-list"></div>
+            <button id="btn-add-fragment" class="btn btn-ghost btn-add-fragment">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add fragment
+            </button>
             <div class="text-input-footer">
               <span id="text-char-count" class="text-char-count">0 characters</span>
               <button id="btn-generate-qr" class="btn btn-primary">
@@ -238,11 +242,7 @@
               <p id="recv-summary"></p>
               <p class="crc-badge" id="recv-crc"></p>
               <div id="text-result" class="text-result hidden">
-                <pre id="text-content"></pre>
-                <button id="btn-copy" class="btn btn-primary">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  <span id="copy-label">Copy to Clipboard</span>
-                </button>
+                <div id="fragment-results" class="fragment-results"></div>
               </div>
               <div class="complete-actions">
                 <button id="btn-download" class="btn btn-primary btn-large">
@@ -293,7 +293,7 @@
         <footer>
           <p>&copy; Aionda GmbH &mdash; <a href="https://aionda.com/impressum/" target="_blank" rel="noopener" class="footer-link">Imprint</a></p>
           <p>No server, no cloud, no tracking. 100% offline.</p>
-          <p>v5.3.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
+          <p>v5.4.0 &mdash; <a href="https://github.com/AiondaDotCom/qrtransfer/releases/latest" target="_blank" rel="noopener" class="footer-link">Download offline HTML</a></p>
         </footer>
       </div>
     </div>

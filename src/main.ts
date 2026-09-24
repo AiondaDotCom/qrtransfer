@@ -1,7 +1,7 @@
 import './styles.css';
 import { Sender } from './sender';
 import { Receiver } from './receiver';
-import { formatFileSize, TransferMetadata } from './protocol';
+import { formatFileSize, parseFragments, TransferMetadata } from './protocol';
 import jsQR from 'jsqr';
 import { parseFeedback, getMissingChunks } from './feedback';
 
@@ -24,7 +24,8 @@ const receivePanel = $('receive-panel');
 const modeFile = $<HTMLButtonElement>('mode-file');
 const modeText = $<HTMLButtonElement>('mode-text');
 const textInputZone = $('text-input-zone');
-const textInput = $<HTMLTextAreaElement>('text-input');
+const fragmentList = $('fragment-list');
+const btnAddFragment = $<HTMLButtonElement>('btn-add-fragment');
 const textCharCount = $('text-char-count');
 const btnGenerateQR = $<HTMLButtonElement>('btn-generate-qr');
 
@@ -42,6 +43,8 @@ const speedVal = $('speed-val');
 const qrCanvas = $<HTMLCanvasElement>('qr-canvas');
 const sendChunkGrid = $('send-chunk-grid');
 const qrOverlay = $('qr-overlay');
+const sendProgressText = $('send-progress-text');
+const chunkGridHint = $('chunk-grid-hint');
 const sendCurrent = $('send-current');
 const sendTotal = $('send-total');
 const btnPlayOverlay = $<HTMLButtonElement>('btn-play-overlay');
@@ -77,9 +80,7 @@ const recvSummary = $('recv-summary');
 const recvCrc = $('recv-crc');
 const btnDownload = $<HTMLButtonElement>('btn-download');
 const textResult = $('text-result');
-const textContent = $<HTMLPreElement>('text-content');
-const btnCopy = $<HTMLButtonElement>('btn-copy');
-const copyLabel = $('copy-label');
+const fragmentResults = $('fragment-results');
 
 // Feedback QR (receiver)
 const btnShowFeedback = $<HTMLButtonElement>('btn-show-feedback');
@@ -92,11 +93,11 @@ const btnDismissFeedback = $<HTMLButtonElement>('btn-dismiss-feedback');
 let sender: Sender | null = null;
 let receiver: Receiver | null = null;
 let currentFile: File | null = null;
-let currentText: string | null = null;
+let currentFragments: string[] | null = null;
 let sendMode: 'file' | 'text' = 'file';
 let downloadBlob: Blob | null = null;
 let downloadFilename = '';
-let receivedText: string | null = null;
+let receivedFragments: string[] | null = null;
 let receivedFileData: Uint8Array | null = null;
 let receivedFilename = '';
 
@@ -124,30 +125,116 @@ function switchSendMode(mode: 'file' | 'text') {
   } else {
     dropZone.classList.add('hidden');
     textInputZone.classList.remove('hidden');
-    textInput.focus();
+    if (fragmentList.children.length === 0) addFragmentInput();
+    focusFragment(0);
   }
 }
 
 modeFile.addEventListener('click', () => switchSendMode('file'));
 modeText.addEventListener('click', () => switchSendMode('text'));
 
-// ===== Send: Text Input =====
-textInput.addEventListener('input', () => {
-  textCharCount.textContent = `${textInput.value.length} characters`;
+// ===== Send: Text Fragments =====
+// Each fragment (e.g. user / password / url) gets its own copy button on the receiver.
+const COPY_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const CHECK_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const REMOVE_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+function getFragmentInputs(): HTMLTextAreaElement[] {
+  return Array.from(fragmentList.querySelectorAll('textarea'));
+}
+
+function focusFragment(index: number) {
+  getFragmentInputs()[index]?.focus();
+}
+
+function autoGrow(ta: HTMLTextAreaElement) {
+  ta.style.height = 'auto';
+  ta.style.height = `${ta.scrollHeight + 2}px`;
+}
+
+function updateFragmentUI() {
+  const inputs = getFragmentInputs();
+  inputs.forEach((ta, i) => {
+    ta.placeholder = inputs.length === 1
+      ? 'Paste text, links, or notes here...'
+      : `Fragment ${i + 1}`;
+  });
+  fragmentList.classList.toggle('single', inputs.length === 1);
+  const chars = inputs.reduce((sum, ta) => sum + ta.value.length, 0);
+  const filled = inputs.filter(ta => ta.value.length > 0).length;
+  textCharCount.textContent = inputs.length > 1
+    ? `${filled} fragments, ${chars} characters`
+    : `${chars} characters`;
+}
+
+function addFragmentInput(value = '') {
+  const row = document.createElement('div');
+  row.className = 'fragment-row';
+  const ta = document.createElement('textarea');
+  ta.rows = 1;
+  ta.value = value;
+  ta.spellcheck = false;
+  ta.autocapitalize = 'off';
+  ta.addEventListener('input', () => { autoGrow(ta); updateFragmentUI(); });
+  ta.addEventListener('keydown', (e) => {
+    // Cmd/Ctrl+Enter: new fragment below
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      addFragmentInput();
+      focusFragment(getFragmentInputs().length - 1);
+    }
+  });
+  const btnRemove = document.createElement('button');
+  btnRemove.className = 'btn-fragment-remove';
+  btnRemove.title = 'Remove fragment';
+  btnRemove.innerHTML = REMOVE_ICON;
+  btnRemove.addEventListener('click', () => {
+    row.remove();
+    if (fragmentList.children.length === 0) addFragmentInput();
+    updateFragmentUI();
+  });
+  row.append(ta, btnRemove);
+  fragmentList.appendChild(row);
+  updateFragmentUI();
+  requestAnimationFrame(() => autoGrow(ta));
+}
+
+function setFragmentInputs(fragments: string[]) {
+  fragmentList.innerHTML = '';
+  for (const f of fragments) addFragmentInput(f);
+  if (fragments.length === 0) addFragmentInput();
+}
+
+btnAddFragment.addEventListener('click', () => {
+  addFragmentInput();
+  focusFragment(getFragmentInputs().length - 1);
 });
 
-btnGenerateQR.addEventListener('click', () => handleText(textInput.value));
+btnGenerateQR.addEventListener('click', () => {
+  handleFragments(getFragmentInputs().map(ta => ta.value));
+});
 
-async function handleText(text: string) {
-  if (!text.trim()) return;
-  currentText = text;
+async function handleFragments(values: string[]) {
+  const fragments = values.filter(f => f.trim());
+  if (fragments.length === 0) return;
+  currentFragments = fragments;
   currentFile = null;
   if (sender) sender.destroy();
   sender = new Sender(qrCanvas, createSenderCallbacks());
   const chunkSize = parseInt(chunkSizeSlider.value);
-  await sender.loadText(text, chunkSize);
+  fileName.textContent = fragments.length > 1 ? `${fragments.length} text fragments` : 'Text';
+  fileSize.textContent = formatFileSize(fragments.reduce((sum, f) => sum + new TextEncoder().encode(f).length, 0));
+  await loadFragmentsInto(sender, fragments, chunkSize);
+  chunkCount.textContent = sender.totalPackets > 1 ? `${sender.totalPackets} chunks` : '';
   textInputZone.classList.add('hidden');
   sendActive.classList.remove('hidden');
+}
+
+// A single fragment is sent as plain text (compatible with older receivers)
+function loadFragmentsInto(s: Sender, fragments: string[], chunkSize: number) {
+  return fragments.length === 1
+    ? s.loadText(fragments[0], chunkSize)
+    : s.loadFragments(fragments, chunkSize);
 }
 
 // ===== Send: File Selection =====
@@ -169,8 +256,18 @@ function createSenderCallbacks() {
       sendActive.classList.remove('hidden');
       sendTotal.textContent = String(total);
       sendCurrent.textContent = '1';
-      qrOverlay.classList.remove('hidden');
-      initSendChunkGrid(total);
+      // A single QR code needs no playback: just show it
+      const single = total === 1;
+      qrOverlay.classList.toggle('hidden', single);
+      sendProgressText.classList.toggle('hidden', single);
+      btnScanFeedback.classList.toggle('hidden', single);
+      btnResumeAll.classList.add('hidden');
+      if (single) {
+        sendChunkGrid.classList.add('hidden');
+        chunkGridHint.classList.add('hidden');
+      } else {
+        initSendChunkGrid(total);
+      }
     },
     onProgress: (current: number, total: number) => {
       sendCurrent.textContent = String(current + 1);
@@ -196,7 +293,7 @@ function createSenderCallbacks() {
 
 async function handleFile(file: File) {
   currentFile = file;
-  currentText = null;
+  currentFragments = null;
   if (sender) sender.destroy();
   sender = new Sender(qrCanvas, createSenderCallbacks());
   fileName.textContent = file.name;
@@ -216,12 +313,12 @@ btnPlayOverlay.addEventListener('click', () => {
 chunkSizeSlider.addEventListener('input', () => { chunkSizeVal.textContent = `${chunkSizeSlider.value} B`; });
 chunkSizeSlider.addEventListener('change', async () => {
   if (!sender) return;
-  if (!currentFile && !currentText) return;
+  if (!currentFile && !currentFragments) return;
   sender.destroy();
   sender = new Sender(qrCanvas, createSenderCallbacks());
   const cs = parseInt(chunkSizeSlider.value);
   if (currentFile) await sender.loadFile(currentFile, cs);
-  else if (currentText) await sender.loadText(currentText, cs);
+  else if (currentFragments) await loadFragmentsInto(sender, currentFragments, cs);
 });
 speedSlider.addEventListener('input', () => {
   speedVal.textContent = `${speedSlider.value} ms`;
@@ -631,17 +728,28 @@ function showComplete(data: Uint8Array, metadata: TransferMetadata) {
   if (recvControls) recvControls.classList.add('hidden');
   btnShowFeedback.classList.add('hidden');
 
-  if (metadata.type === 'text') {
-    const text = new TextDecoder().decode(data);
-    receivedText = text;
-    recvFilename.textContent = 'Text snippet';
-    recvFilesize.textContent = formatFileSize(metadata.fileSize);
-    recvSummary.textContent = `Text (${formatFileSize(metadata.fileSize)})`;
+  if (metadata.type === 'text' || metadata.type === 'fragments') {
+    let fragments: string[];
+    try {
+      fragments = metadata.type === 'fragments'
+        ? parseFragments(data)
+        : [new TextDecoder().decode(data)];
+    } catch (err) {
+      showError(`Invalid fragment data: ${err}`);
+      return;
+    }
+    receivedFragments = fragments;
+    receivedFileData = null;
+    const label = fragments.length > 1 ? `${fragments.length} text fragments` : 'Text snippet';
+    const size = formatFileSize(fragments.reduce((sum, f) => sum + new TextEncoder().encode(f).length, 0));
+    recvFilename.textContent = label;
+    recvFilesize.textContent = size;
+    recvSummary.textContent = `${label} (${size})`;
     textResult.classList.remove('hidden');
-    textContent.textContent = text;
+    renderFragmentResults(fragments);
     btnDownload.classList.add('hidden');
   } else {
-    receivedText = null;
+    receivedFragments = null;
     receivedFileData = data;
     receivedFilename = metadata.filename;
     recvFilename.textContent = metadata.filename;
@@ -660,29 +768,49 @@ function showComplete(data: Uint8Array, metadata: TransferMetadata) {
   }
 }
 
-// ===== Receive: Copy & Re-send =====
-btnCopy.addEventListener('click', async () => {
-  if (!receivedText) return;
+// ===== Receive: Fragments with Copy Buttons & Re-send =====
+function renderFragmentResults(fragments: string[]) {
+  fragmentResults.innerHTML = '';
+  for (const fragment of fragments) {
+    const row = document.createElement('div');
+    row.className = 'fragment-result';
+    const pre = document.createElement('pre');
+    pre.textContent = fragment;
+    const btn = document.createElement('button');
+    btn.className = 'btn-fragment-copy';
+    btn.title = 'Copy to clipboard';
+    btn.innerHTML = COPY_ICON;
+    btn.addEventListener('click', async () => {
+      await copyToClipboard(fragment);
+      for (const other of fragmentResults.querySelectorAll('.btn-fragment-copy.copied')) {
+        other.classList.remove('copied');
+        other.innerHTML = COPY_ICON;
+      }
+      btn.classList.add('copied');
+      btn.innerHTML = CHECK_ICON;
+      setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = COPY_ICON; }, 2000);
+    });
+    row.append(pre, btn);
+    fragmentResults.appendChild(row);
+  }
+}
+
+async function copyToClipboard(text: string) {
   try {
-    await navigator.clipboard.writeText(receivedText);
-    copyLabel.textContent = 'Copied!';
-    setTimeout(() => { copyLabel.textContent = 'Copy to Clipboard'; }, 2000);
+    await navigator.clipboard.writeText(text);
   } catch {
     const ta = document.createElement('textarea');
-    ta.value = receivedText;
+    ta.value = text;
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-    copyLabel.textContent = 'Copied!';
-    setTimeout(() => { copyLabel.textContent = 'Copy to Clipboard'; }, 2000);
   }
-});
+}
 
 const btnResend = $<HTMLButtonElement>('btn-resend');
 btnResend.addEventListener('click', async () => {
-  if (receivedText) {
+  if (receivedFragments) {
     switchTab('send'); switchSendMode('text');
-    textInput.value = receivedText;
-    textCharCount.textContent = `${receivedText.length} characters`;
-    handleText(receivedText);
+    setFragmentInputs(receivedFragments);
+    handleFragments(receivedFragments);
   } else if (receivedFileData) {
     const file = new File([receivedFileData as unknown as BlobPart], receivedFilename);
     switchTab('send'); switchSendMode('file');

@@ -190,7 +190,21 @@ header {
   margin-bottom: 16px;
 }
 
+.fragment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fragment-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .text-input-zone textarea {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   padding: 14px;
   background: var(--bg-card);
@@ -213,6 +227,49 @@ header {
   color: var(--text-muted);
 }
 
+.fragment-list:not(.single) textarea {
+  overflow-y: hidden;
+  resize: none;
+}
+
+.fragment-list.single textarea {
+  min-height: 150px;
+}
+
+.fragment-list.single .btn-fragment-remove {
+  display: none;
+}
+
+.btn-fragment-remove,
+.btn-fragment-copy {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-fragment-remove {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn-fragment-remove:hover {
+  color: var(--error);
+}
+
+.btn-add-fragment {
+  margin-top: 8px;
+}
+
 .text-input-footer {
   display: flex;
   align-items: center;
@@ -232,11 +289,25 @@ header {
   margin-bottom: 16px;
 }
 
-.text-result pre {
+.fragment-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fragment-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.fragment-result pre {
+  flex: 1;
+  min-width: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px;
+  padding: 11px 14px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 0.85rem;
   line-height: 1.5;
@@ -245,11 +316,19 @@ header {
   word-break: break-all;
   max-height: 300px;
   overflow-y: auto;
-  margin-bottom: 12px;
+  user-select: all;
+  -webkit-user-select: all;
 }
 
-.text-result .btn {
-  width: 100%;
+.btn-fragment-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+
+.btn-fragment-copy.copied {
+  border-color: var(--success);
+  color: var(--success);
+  background: var(--success-glow);
 }
 
 .complete-actions {
